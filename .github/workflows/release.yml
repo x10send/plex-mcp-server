@@ -1,0 +1,134 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+  packages: write
+  attestations: write
+  id-token: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
+    outputs:
+      digest-amd64: ${{ steps.push.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push by digest
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: true
+          outputs: type=image,name=ghcr.io/x10send/plex-mcp-server,push-by-digest=true,name-canonical=true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.push.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.runner }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+          retention-days: 1
+
+  merge:
+    runs-on: ubuntu-latest
+    needs: build
+    outputs:
+      digest: ${{ steps.merge.outputs.digest }}
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          path: /tmp/digests
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Extract version
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          major="${tag%%.*}"
+          minor="${tag%.*}"
+          echo "full=$tag" >> "$GITHUB_OUTPUT"
+          echo "minor=$minor" >> "$GITHUB_OUTPUT"
+          echo "major=$major" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push manifest
+        id: merge
+        run: |
+          digests=$(find /tmp/digests -type f -exec basename {} \; | sed 's/^/sha256:/' | tr '\n' ' ')
+          digest=$(docker buildx imagetools create \
+            --tag ghcr.io/x10send/plex-mcp-server:${{ steps.version.outputs.full }} \
+            --tag ghcr.io/x10send/plex-mcp-server:${{ steps.version.outputs.minor }} \
+            --tag ghcr.io/x10send/plex-mcp-server:${{ steps.version.outputs.major }} \
+            --tag ghcr.io/x10send/plex-mcp-server:latest \
+            $digests 2>&1 | grep -oP 'sha256:[a-f0-9]+' | head -1)
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect manifest
+        run: |
+          docker buildx imagetools inspect \
+            ghcr.io/x10send/plex-mcp-server:${{ steps.version.outputs.full }}
+
+  attest:
+    runs-on: ubuntu-latest
+    needs: merge
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate SBOM and provenance attestation
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-name: ghcr.io/x10send/plex-mcp-server
+          subject-digest: ${{ needs.merge.outputs.digest }}
+          push-to-registry: true

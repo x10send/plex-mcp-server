@@ -1,0 +1,48 @@
+{
+  "name": "plex-mcp-server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP server for Plex Media Server — browse libraries, search media, and get viewing recommendations via AI",
+  "type": "module",
+  "main": "dist/server.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/x10send/plex-mcp-server.git"
+  },
+  "homepage": "https://github.com/x10send/plex-mcp-server#readme",
+  "bugs": {
+    "url": "https://github.com/x10send/plex-mcp-server/issues"
+  },
+  "author": "x10send contributors",
+  "keywords": ["mcp", "plex", "media-server", "ai", "modelcontextprotocol"],
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node dist/server.js",
+    "test": "node --import tsx --test test/**/*.test.ts",
+    "test:coverage": "node --import tsx --test --experimental-test-coverage --test-coverage-include=src/app.ts --test-coverage-include=src/config.ts --test-coverage-include=src/plex-client.ts --test-coverage-include=src/tools/*.ts --test-coverage-lines=85 --test-coverage-functions=85 --test-coverage-branches=70 test/**/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src test",
+    "format": "prettier --write src test",
+    "format:check": "prettier --check src test",
+    "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage && npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "fastify": "^5.4.0",
+    "zod": "^3.25.41"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.21",
+    "eslint": "^9.27.0",
+    "@eslint/js": "^9.27.0",
+    "typescript-eslint": "^8.32.1",
+    "prettier": "^3.5.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

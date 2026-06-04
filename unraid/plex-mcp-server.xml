@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<Container version="2">
+  <Name>plex-mcp-server</Name>
+  <Repository>ghcr.io/x10send/plex-mcp-server:latest</Repository>
+  <Registry>https://ghcr.io/x10send/plex-mcp-server</Registry>
+  <Network>bridge</Network>
+  <Shell>sh</Shell>
+  <Privileged>false</Privileged>
+  <Support>https://github.com/x10send/plex-mcp-server/issues</Support>
+  <Project>https://github.com/x10send/plex-mcp-server</Project>
+  <Overview>MCP (Model Context Protocol) server for Plex Media Server. Exposes library browsing, content discovery, watch history, and recommendations over Streamable HTTP so AI assistants (Claude, etc.) can interact with your Plex library. Designed to sit behind mcp-edge-gateway for authentication.</Overview>
+  <Category>Tools:</Category>
+  <WebUI/>
+  <TemplateURL>https://raw.githubusercontent.com/x10send/plex-mcp-server/main/unraid/plex-mcp-server.xml</TemplateURL>
+  <Icon>https://raw.githubusercontent.com/x10send/plex-mcp-server/main/unraid/icon.png</Icon>
+  <ExtraParams/>
+  <PostArgs/>
+  <CPUset/>
+  <DateInstalled/>
+  <DonateText/>
+  <DonateLink/>
+  <Requires/>
+  <Config Name="MCP HTTP Port" Target="3000" Default="3003" Mode="tcp" Description="Host port for the MCP server. Use this in your mcp-edge-gateway upstream URL." Type="Port" Display="always" Required="true" Mask="false">3003</Config>
+  <Config Name="Plex URL" Target="PLEX_URL" Default="http://192.168.1.x:32400" Mode="" Description="Base URL of your Plex Media Server, including protocol and port." Type="Variable" Display="always" Required="true" Mask="false">http://192.168.1.x:32400</Config>
+  <Config Name="Plex Token" Target="PLEX_TOKEN" Default="" Mode="" Description="Plex authentication token. Optional when mcp-edge-gateway is configured to inject the X-Plex-Token header (recommended). Required for direct deployments without the gateway." Type="Variable" Display="always" Required="false" Mask="true"></Config>
+  <Config Name="Plex Client ID" Target="PLEX_CLIENT_ID" Default="" Mode="" Description="Stable UUID sent as X-Plex-Client-Identifier. Auto-generated each startup if not set." Type="Variable" Display="advanced" Required="false" Mask="false"></Config>
+  <Config Name="Log Level" Target="LOG_LEVEL" Default="info" Mode="" Description="Log verbosity: trace, debug, info, warn, error. Use info in production." Type="Variable" Display="advanced" Required="false" Mask="false">info</Config>
+</Container>

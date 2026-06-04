@@ -1,0 +1,13 @@
+services:
+  plex-mcp-server:
+    image: ghcr.io/x10send/plex-mcp-server:latest
+    restart: unless-stopped
+    ports:
+      - "3003:3000"
+    environment:
+      PLEX_URL: ${PLEX_URL}
+      # PLEX_TOKEN is optional when mcp-edge-gateway injects X-Plex-Token header.
+      # Set it here only for direct (non-gateway) deployments.
+      PLEX_TOKEN: ${PLEX_TOKEN:-}
+      PLEX_CLIENT_ID: ${PLEX_CLIENT_ID:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
