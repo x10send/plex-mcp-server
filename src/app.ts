@@ -7,6 +7,7 @@ import { registerDiscoveryTools } from "./tools/discovery.js";
 import { registerLiveTvTools } from "./tools/livetv.js";
 import { registerSessionTools } from "./tools/sessions.js";
 import { registerServerOpsTools } from "./tools/server-ops.js";
+import { registerDvrTools } from "./tools/dvr.js";
 
 export interface AppConfig {
   plexUrl: string;
@@ -31,6 +32,7 @@ function buildMcpServer(plexUrl: string, token: string, clientId: string): McpSe
   registerLiveTvTools(server, client);
   registerSessionTools(server, client);
   registerServerOpsTools(server, client);
+  registerDvrTools(server, client);
   return server;
 }
 

@@ -33,6 +33,30 @@ export function makeMockClient(): MockPlexClient {
       }
       return res as T;
     },
+    async post<T>(path: string): Promise<T> {
+      const err = errors.get(path);
+      if (err) {
+        const { PlexApiError } = await import("../src/plex-client.js");
+        throw new PlexApiError(err.status, err.message);
+      }
+      const res = responses.get(path);
+      if (res === undefined) {
+        throw new Error(`MockPlexClient: no response configured for POST ${path}`);
+      }
+      return res as T;
+    },
+    async delete<T>(path: string): Promise<T> {
+      const err = errors.get(path);
+      if (err) {
+        const { PlexApiError } = await import("../src/plex-client.js");
+        throw new PlexApiError(err.status, err.message);
+      }
+      const res = responses.get(path);
+      if (res === undefined) {
+        throw new Error(`MockPlexClient: no response configured for DELETE ${path}`);
+      }
+      return res as T;
+    },
   };
 }
 

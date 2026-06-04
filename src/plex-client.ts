@@ -6,6 +6,8 @@ export interface PlexClientConfig {
 
 export interface IPlexClient {
   get<T>(path: string, params?: Record<string, string>): Promise<T>;
+  post<T>(path: string, params?: Record<string, string>): Promise<T>;
+  delete<T>(path: string): Promise<T>;
 }
 
 export class PlexApiError extends Error {
@@ -34,8 +36,24 @@ export class PlexClient implements IPlexClient {
   }
 
   async get<T>(path: string, params?: Record<string, string>): Promise<T> {
+    return this.request<T>("GET", path, params);
+  }
+
+  async post<T>(path: string, params?: Record<string, string>): Promise<T> {
+    return this.request<T>("POST", path, params);
+  }
+
+  async delete<T>(path: string): Promise<T> {
+    return this.request<T>("DELETE", path);
+  }
+
+  private async request<T>(
+    method: string,
+    path: string,
+    params?: Record<string, string>
+  ): Promise<T> {
     const url = this.buildUrl(path, params);
-    const res = await fetch(url, { headers: this.headers });
+    const res = await fetch(url, { method, headers: this.headers });
     if (!res.ok) throw new PlexApiError(res.status, await this.errorText(res));
     return res.json() as Promise<T>;
   }
