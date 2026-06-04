@@ -1,0 +1,309 @@
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import { registerServerOpsTools } from "../src/tools/server-ops.js";
+import { makeMockClient, callTool, type RegisterFn } from "./helpers.js";
+
+const register: RegisterFn = registerServerOpsTools;
+
+// ── get_server_info ───────────────────────────────────────────────────────────
+
+describe("get_server_info", () => {
+  it("returns full server info", async () => {
+    const client = makeMockClient();
+    client.setResponse("/", {
+      MediaContainer: {
+        friendlyName: "Homelab",
+        version: "1.40.0.1234-abc",
+        platform: "Linux",
+        platformVersion: "6.1.0",
+        machineIdentifier: "abc123xyz",
+        myPlexUsername: "user@example.com",
+        myPlexSubscription: true,
+        transcoderActiveVideoSessions: 2,
+        livetv: 7,
+        updatedAt: 1717200000,
+      },
+    });
+    const { text, isError } = await callTool(register, "get_server_info", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /Homelab/);
+    assert.match(text, /1\.40\.0/);
+    assert.match(text, /Linux/);
+    assert.match(text, /6\.1\.0/);
+    assert.match(text, /abc123xyz/);
+    assert.match(text, /user@example\.com/);
+    assert.match(text, /Plex Pass: yes/);
+    assert.match(text, /Active video transcodes: 2/);
+    assert.match(text, /Live TV: available/);
+    assert.match(text, /Last updated:/);
+  });
+
+  it("shows 'no' for Plex Pass and 'not configured' for Live TV when absent", async () => {
+    const client = makeMockClient();
+    client.setResponse("/", {
+      MediaContainer: {
+        friendlyName: "Server",
+        version: "1.0.0",
+        platform: "Linux",
+        machineIdentifier: "id1",
+        myPlexSubscription: false,
+        transcoderActiveVideoSessions: 0,
+      },
+    });
+    const { text } = await callTool(register, "get_server_info", {}, client);
+    assert.match(text, /Plex Pass: no/);
+    assert.match(text, /Live TV: not configured/);
+    assert.doesNotMatch(text, /Last updated/);
+  });
+
+  it("handles missing optional fields gracefully", async () => {
+    const client = makeMockClient();
+    client.setResponse("/", { MediaContainer: {} });
+    const { text, isError } = await callTool(register, "get_server_info", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /Name: Unknown/);
+    assert.match(text, /Version: Unknown/);
+  });
+
+  it("returns error on API failure", async () => {
+    const client = makeMockClient();
+    client.setError("/", 500, "Server error");
+    const { isError } = await callTool(register, "get_server_info", {}, client);
+    assert.equal(isError, true);
+  });
+});
+
+// ── get_server_statistics ─────────────────────────────────────────────────────
+
+describe("get_server_statistics", () => {
+  it("returns bandwidth stats with LAN and WAN breakdown", async () => {
+    const client = makeMockClient();
+    client.setResponse("/statistics/bandwidth", {
+      MediaContainer: {
+        StatisticsBandwidth: [
+          { bytes: 1_500_000_000, direction: 0 }, // LAN: 1.5 GB
+          { bytes: 500_000_000, direction: 1 }, // WAN: 500 MB
+        ],
+      },
+    });
+    const { text, isError } = await callTool(register, "get_server_statistics", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /Bandwidth statistics \(last days\)/);
+    assert.match(text, /Total:/);
+    assert.match(text, /LAN:/);
+    assert.match(text, /WAN:/);
+    assert.match(text, /GB/);
+    assert.match(text, /Data points: 2/);
+  });
+
+  it("accepts timespan parameter", async () => {
+    const client = makeMockClient();
+    client.setResponse("/statistics/bandwidth", {
+      MediaContainer: {
+        StatisticsBandwidth: [{ bytes: 100_000, direction: 0 }],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_server_statistics",
+      { timespan: "weeks" },
+      client
+    );
+    assert.match(text, /last weeks/);
+  });
+
+  it("returns no-stats message when empty", async () => {
+    const client = makeMockClient();
+    client.setResponse("/statistics/bandwidth", {
+      MediaContainer: { StatisticsBandwidth: [] },
+    });
+    const { text } = await callTool(register, "get_server_statistics", {}, client);
+    assert.match(text, /No bandwidth statistics/);
+  });
+
+  it("returns error on API failure", async () => {
+    const client = makeMockClient();
+    client.setError("/statistics/bandwidth", 500, "Error");
+    const { isError } = await callTool(register, "get_server_statistics", {}, client);
+    assert.equal(isError, true);
+  });
+
+  it("formats bytes correctly across all ranges", async () => {
+    const client = makeMockClient();
+    // Test GB range
+    client.setResponse("/statistics/bandwidth", {
+      MediaContainer: {
+        StatisticsBandwidth: [{ bytes: 2_000_000_000, direction: 0 }],
+      },
+    });
+    const { text: gbText } = await callTool(register, "get_server_statistics", {}, client);
+    assert.match(gbText, /GB/);
+
+    // Test MB range
+    client.setResponse("/statistics/bandwidth", {
+      MediaContainer: {
+        StatisticsBandwidth: [{ bytes: 5_000_000, direction: 0 }],
+      },
+    });
+    const { text: mbText } = await callTool(register, "get_server_statistics", {}, client);
+    assert.match(mbText, /MB/);
+
+    // Test KB range
+    client.setResponse("/statistics/bandwidth", {
+      MediaContainer: {
+        StatisticsBandwidth: [{ bytes: 50_000, direction: 0 }],
+      },
+    });
+    const { text: kbText } = await callTool(register, "get_server_statistics", {}, client);
+    assert.match(kbText, /KB/);
+
+    // Test bytes range
+    client.setResponse("/statistics/bandwidth", {
+      MediaContainer: {
+        StatisticsBandwidth: [{ bytes: 500, direction: 0 }],
+      },
+    });
+    const { text: bText } = await callTool(register, "get_server_statistics", {}, client);
+    assert.match(bText, /500 B/);
+  });
+});
+
+// ── get_activities ────────────────────────────────────────────────────────────
+
+describe("get_activities", () => {
+  it("returns activity list with progress and subtitle", async () => {
+    const client = makeMockClient();
+    client.setResponse("/activities", {
+      MediaContainer: {
+        Activity: [
+          {
+            title: "Scanning Movies",
+            subtitle: "Processing /media/movies",
+            progress: 42,
+            cancellable: true,
+          },
+          {
+            title: "Refreshing metadata",
+            progress: 80,
+            cancellable: false,
+          },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(register, "get_activities", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /Background activities \(2\)/);
+    assert.match(text, /Scanning Movies/);
+    assert.match(text, /\[cancellable\]/);
+    assert.match(text, /Processing \/media\/movies/);
+    assert.match(text, /Progress: 42%/);
+    assert.match(text, /Refreshing metadata/);
+    // [cancellable] appears exactly once (only on Scanning Movies, not Refreshing)
+    assert.equal((text.match(/\[cancellable\]/g) ?? []).length, 1);
+  });
+
+  it("returns no-activities message when empty", async () => {
+    const client = makeMockClient();
+    client.setResponse("/activities", { MediaContainer: { Activity: [] } });
+    const { text } = await callTool(register, "get_activities", {}, client);
+    assert.match(text, /No active background activities/);
+  });
+
+  it("handles activity with no subtitle or progress", async () => {
+    const client = makeMockClient();
+    client.setResponse("/activities", {
+      MediaContainer: {
+        Activity: [{ title: "Minimal Task", cancellable: false }],
+      },
+    });
+    const { text, isError } = await callTool(register, "get_activities", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /Minimal Task/);
+    assert.doesNotMatch(text, /Progress/);
+  });
+
+  it("returns error on API failure", async () => {
+    const client = makeMockClient();
+    client.setError("/activities", 500, "Error");
+    const { isError } = await callTool(register, "get_activities", {}, client);
+    assert.equal(isError, true);
+  });
+});
+
+// ── get_butler_tasks ──────────────────────────────────────────────────────────
+
+describe("get_butler_tasks", () => {
+  it("returns butler task list with schedule and last run", async () => {
+    const client = makeMockClient();
+    client.setResponse("/butler", {
+      MediaContainer: {
+        ButlerTask: [
+          {
+            name: "BackupDatabase",
+            title: "Backup Database",
+            enabled: true,
+            schedule: "02:00",
+            lastExecution: 1717200000,
+            nextExecution: 1717286400,
+            lastExecutionResult: "Succeeded",
+          },
+          {
+            name: "CleanOldBundles",
+            title: "Clean Old Bundles",
+            enabled: false,
+            schedule: "03:00",
+          },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(register, "get_butler_tasks", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /Butler tasks \(2\)/);
+    assert.match(text, /Backup Database/);
+    assert.match(text, /Schedule: 02:00/);
+    assert.match(text, /Last result: Succeeded/);
+    assert.match(text, /Last run:/);
+    assert.match(text, /Next run:/);
+    assert.match(text, /Clean Old Bundles/);
+    assert.match(text, /\[disabled\]/);
+  });
+
+  it("uses name as fallback when title missing", async () => {
+    const client = makeMockClient();
+    client.setResponse("/butler", {
+      MediaContainer: {
+        ButlerTask: [{ name: "SomeTask", enabled: true }],
+      },
+    });
+    const { text } = await callTool(register, "get_butler_tasks", {}, client);
+    assert.match(text, /SomeTask/);
+  });
+
+  it("returns no-tasks message when empty", async () => {
+    const client = makeMockClient();
+    client.setResponse("/butler", { MediaContainer: { ButlerTask: [] } });
+    const { text } = await callTool(register, "get_butler_tasks", {}, client);
+    assert.match(text, /No butler tasks found/);
+  });
+
+  it("handles task with no optional fields", async () => {
+    const client = makeMockClient();
+    client.setResponse("/butler", {
+      MediaContainer: {
+        ButlerTask: [{ title: "Bare Task", enabled: true }],
+      },
+    });
+    const { text, isError } = await callTool(register, "get_butler_tasks", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /Bare Task/);
+    assert.doesNotMatch(text, /Schedule/);
+    assert.doesNotMatch(text, /Last run/);
+  });
+
+  it("returns error on API failure", async () => {
+    const client = makeMockClient();
+    client.setError("/butler", 500, "Error");
+    const { isError } = await callTool(register, "get_butler_tasks", {}, client);
+    assert.equal(isError, true);
+  });
+});
