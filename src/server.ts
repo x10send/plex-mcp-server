@@ -15,7 +15,7 @@ async function main(): Promise<void> {
   await validatePlexUrl(config.plexUrl, (msg) => app.log.warn(msg));
 
   const address = await app.listen({ port: config.port, host: "0.0.0.0" });
-  app.log.info({ plexUrl: new URL(config.plexUrl).host, address }, "plex-mcp-server started");
+  app.log.info({ plexUrl: config.plexUrl, address }, "plex-mcp-server started");
 
   const shutdown = async (signal: string): Promise<void> => {
     app.log.info({ signal }, "Shutting down");

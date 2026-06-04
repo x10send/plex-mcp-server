@@ -4,6 +4,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { PlexClient } from "./plex-client.js";
 import { registerLibraryTools } from "./tools/library.js";
 import { registerDiscoveryTools } from "./tools/discovery.js";
+import { registerLiveTvTools } from "./tools/livetv.js";
 
 export interface AppConfig {
   plexUrl: string;
@@ -25,6 +26,7 @@ function buildMcpServer(plexUrl: string, token: string, clientId: string): McpSe
   const server = new McpServer({ name: "plex-mcp-server", version: "0.1.0" });
   registerLibraryTools(server, client);
   registerDiscoveryTools(server, client);
+  registerLiveTvTools(server, client);
   return server;
 }
 
