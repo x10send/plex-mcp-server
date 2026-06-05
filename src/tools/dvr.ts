@@ -19,44 +19,16 @@ interface DvrSubscription {
 }
 
 interface SubscriptionsResponse {
-  MediaContainer: { MediaSubscription?: DvrSubscription[] };
-}
-
-interface CreateResponse {
-  MediaContainer: { MediaSubscription?: DvrSubscription[] };
-}
-
-interface DvrDiscoveryResponse {
-  MediaContainer: { DVRDevice?: Array<{ key?: unknown }> };
+  MediaContainer: { MediaSubscription?: unknown };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+const SUBSCRIPTIONS_PATH = "/media/subscriptions";
+
 const DVR_NOT_CONFIGURED =
   "DVR is not configured on this Plex server, or no DVR device is paired. " +
   "Set up a tuner with DVR capability in Plex settings (Settings → Live TV & DVR).";
-
-// Discover the subscriptions base path via /livetv/dvr device list.
-// Returns null when /livetv/dvr 404s (DVR not available) or when no device
-// is paired. Throws for unexpected errors (e.g. 5xx).
-async function resolveSubscriptionsBase(client: IPlexClient): Promise<string | null> {
-  let dvr: DvrDiscoveryResponse;
-  try {
-    dvr = await client.get<DvrDiscoveryResponse>("/livetv/dvr");
-  } catch (err) {
-    if (err instanceof PlexApiError && err.status === 404) return null;
-    throw err;
-  }
-  const device = dvr.MediaContainer?.DVRDevice?.[0];
-  if (!device) return null; // endpoint exists, but no device paired
-  if (device.key) {
-    const key = String(device.key);
-    if (key.startsWith("/") && !key.includes("..") && !key.includes("://")) {
-      return `${key}/subscriptions`;
-    }
-  }
-  return "/livetv/dvr/subscriptions"; // device present but key absent or unsafe
-}
 
 function formatTimestamp(epoch: number): string {
   return new Date(epoch * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC";
@@ -76,6 +48,13 @@ function formatSubscription(s: DvrSubscription): string {
   return `[${id}] ${title}${type}${channel}${timeRange}${status}${padStart}${padEnd}`;
 }
 
+// Plex may return MediaSubscription as an array or a bare object (single item).
+function normaliseSubscriptions(raw: unknown): DvrSubscription[] {
+  if (Array.isArray(raw)) return raw as DvrSubscription[];
+  if (raw && typeof raw === "object") return [raw as DvrSubscription];
+  return [];
+}
+
 // ── Tool registration ────────────────────────────────────────────────────────
 
 export function registerDvrTools(server: McpServer, client: IPlexClient): void {
@@ -85,12 +64,16 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
     {},
     async () => {
       try {
-        const subsBase = await resolveSubscriptionsBase(client);
-        if (subsBase === null) {
-          return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
+        let data: SubscriptionsResponse;
+        try {
+          data = await client.get<SubscriptionsResponse>(SUBSCRIPTIONS_PATH);
+        } catch (err) {
+          if (err instanceof PlexApiError && err.status === 404) {
+            return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
+          }
+          throw err;
         }
-        const data = await client.get<SubscriptionsResponse>(subsBase);
-        const subs = data.MediaContainer?.MediaSubscription ?? [];
+        const subs = normaliseSubscriptions(data.MediaContainer?.MediaSubscription);
         if (subs.length === 0) {
           return { content: [{ type: "text", text: "No scheduled recordings." }] };
         }
@@ -110,15 +93,17 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
       program_id: z
         .string()
         .min(1)
-        .max(200)
+        .max(500)
         .describe(
-          "Program ID from get_live_tv_guide (the full key path, e.g. /library/metadata/12345)"
+          "Program ID from get_live_tv_guide (the program_id value shown under each program)"
         ),
       channel_id: z
         .string()
         .min(1)
         .max(500)
-        .describe("Channel key from get_live_tv_guide (e.g. /livetv/channels/abc123)"),
+        .describe(
+          "Channel ID from get_live_tv_guide (the channel_id value shown in the channel header)"
+        ),
       start_offset_seconds: z
         .number()
         .int()
@@ -145,12 +130,17 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         params.endTimeOffset = String(args.end_offset_seconds);
 
       try {
-        const subsBase = await resolveSubscriptionsBase(client);
-        if (subsBase === null) {
-          return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
+        let data: SubscriptionsResponse;
+        try {
+          data = await client.post<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
+        } catch (err) {
+          if (err instanceof PlexApiError && err.status === 404) {
+            return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
+          }
+          throw err;
         }
-        const data = await client.post<CreateResponse>(subsBase, params);
-        const sub = data.MediaContainer?.MediaSubscription?.[0];
+        const subs = normaliseSubscriptions(data.MediaContainer?.MediaSubscription);
+        const sub = subs[0];
         if (!sub) {
           return {
             content: [
@@ -182,21 +172,18 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
     {
       subscription_id: z
         .string()
-        // Restrict to digits only — Plex subscription IDs are always numeric,
-        // and this prevents any path traversal in the DELETE URL.
         .regex(/^\d+$/, "Subscription ID must be a positive integer")
         .describe("Subscription ID from get_scheduled_recordings or schedule_recording"),
     },
     async (args) => {
       try {
-        const subsBase = await resolveSubscriptionsBase(client);
-        if (subsBase === null) {
-          return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
-        }
-        await client.delete<unknown>(`${subsBase}/${args.subscription_id}`);
+        await client.delete<unknown>(`${SUBSCRIPTIONS_PATH}/${args.subscription_id}`);
         return {
           content: [
-            { type: "text", text: `Recording subscription ${args.subscription_id} cancelled.` },
+            {
+              type: "text",
+              text: `Recording subscription ${args.subscription_id} cancelled.`,
+            },
           ],
         };
       } catch (err) {

@@ -5,6 +5,9 @@ import { makeMockClient, callTool, type RegisterFn } from "./helpers.js";
 
 const register: RegisterFn = registerDvrTools;
 
+// All DVR tools hit /media/subscriptions directly — no device discovery step.
+const SUBS_PATH = "/media/subscriptions";
+
 const SUBSCRIPTION = {
   id: "42",
   title: "National Treasure",
@@ -16,19 +19,11 @@ const SUBSCRIPTION = {
   status: "scheduled",
 };
 
-// DVR device discovery response — resolveSubscriptionsBase() calls this first.
-// The device key "/livetv/dvr/1" yields subscriptions path "/livetv/dvr/1/subscriptions".
-const DVR_DEVICE = {
-  MediaContainer: { DVRDevice: [{ key: "/livetv/dvr/1" }] },
-};
-const SUBS_PATH = "/livetv/dvr/1/subscriptions";
-
 // ── get_scheduled_recordings ──────────────────────────────────────────────────
 
 describe("get_scheduled_recordings", () => {
   it("returns scheduled recordings list", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
@@ -44,7 +39,6 @@ describe("get_scheduled_recordings", () => {
 
   it("returns no-recordings message when empty", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [] },
     });
@@ -55,7 +49,6 @@ describe("get_scheduled_recordings", () => {
 
   it("handles subscription with no optional fields", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [{ id: "1", title: "Bare" }] },
     });
@@ -68,7 +61,6 @@ describe("get_scheduled_recordings", () => {
 
   it("shows pre-roll and post-roll offsets when present", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: {
         MediaSubscription: [{ id: "5", title: "Movie", startTimeOffset: -30, endTimeOffset: 60 }],
@@ -81,7 +73,6 @@ describe("get_scheduled_recordings", () => {
 
   it("endTime without startTime does not produce orphaned arrow", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: {
         MediaSubscription: [{ id: "7", title: "Oddity", endTime: 1717207200 }],
@@ -92,28 +83,30 @@ describe("get_scheduled_recordings", () => {
     assert.doesNotMatch(text, /Starts:/);
   });
 
-  it("returns not-configured message when /livetv/dvr returns 404", async () => {
+  it("returns not-configured message when /media/subscriptions returns 404", async () => {
     const client = makeMockClient();
-    client.setError("/livetv/dvr", 404, "Not found");
+    client.setError(SUBS_PATH, 404, "Not found");
     const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
     assert.equal(isError, false);
     assert.match(text, /not configured/i);
   });
 
-  it("returns not-configured when DVR endpoint has no device", async () => {
+  it("returns error on API failure (non-404)", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", { MediaContainer: { DVRDevice: [] } });
-    const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
-    assert.equal(isError, false);
-    assert.match(text, /not configured/i);
-  });
-
-  it("returns error on API failure on subscriptions endpoint", async () => {
-    const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setError(SUBS_PATH, 503, "DVR unavailable");
     const { isError } = await callTool(register, "get_scheduled_recordings", {}, client);
     assert.equal(isError, true);
+  });
+
+  it("handles single-object MediaSubscription (Plex single-item response)", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: SUBSCRIPTION },
+    });
+    const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /Scheduled recordings \(1\)/);
+    assert.match(text, /National Treasure/);
   });
 });
 
@@ -122,14 +115,13 @@ describe("get_scheduled_recordings", () => {
 describe("schedule_recording", () => {
   it("schedules a recording and returns subscription details", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", channel_id: "/livetv/channels/ch-tnt" },
+      { program_id: "1001", channel_id: "ch-tnt" },
       client
     );
     assert.equal(isError, false);
@@ -143,14 +135,13 @@ describe("schedule_recording", () => {
 
   it("handles response with no subscription object", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [] },
     });
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", channel_id: "/livetv/channels/ch-tnt" },
+      { program_id: "1001", channel_id: "ch-tnt" },
       client
     );
     assert.equal(isError, false);
@@ -159,7 +150,6 @@ describe("schedule_recording", () => {
 
   it("accepts optional start and end offset parameters", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: {
         MediaSubscription: [{ id: "99", title: "Show", channelTitle: "NBC" }],
@@ -170,7 +160,7 @@ describe("schedule_recording", () => {
       "schedule_recording",
       {
         program_id: "2002",
-        channel_id: "/livetv/channels/ch-nbc",
+        channel_id: "ch-nbc",
         start_offset_seconds: 30,
         end_offset_seconds: 120,
       },
@@ -180,27 +170,26 @@ describe("schedule_recording", () => {
     assert.match(text, /Subscription ID: 99/);
   });
 
-  it("returns not-configured message when DVR not available", async () => {
+  it("returns not-configured message when /media/subscriptions returns 404", async () => {
     const client = makeMockClient();
-    client.setError("/livetv/dvr", 404, "Not found");
+    client.setError(SUBS_PATH, 404, "Not found");
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", channel_id: "/livetv/channels/ch-tnt" },
+      { program_id: "1001", channel_id: "ch-tnt" },
       client
     );
     assert.equal(isError, false);
     assert.match(text, /not configured/i);
   });
 
-  it("returns error on API failure", async () => {
+  it("returns error on API failure (non-404)", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setError(SUBS_PATH, 422, "Invalid program");
     const { isError, text } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "bad", channel_id: "/livetv/channels/ch-tnt" },
+      { program_id: "bad", channel_id: "ch-tnt" },
       client
     );
     assert.equal(isError, true);
@@ -209,24 +198,22 @@ describe("schedule_recording", () => {
 
   it("sends programKey and channelKey as POST params", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
     await callTool(
       register,
       "schedule_recording",
-      { program_id: "/library/metadata/1001", channel_id: "/livetv/channels/ch-tnt" },
+      { program_id: "plex%3A%2F%2Fepisode%2Fabc", channel_id: "ch-tnt" },
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.programKey, "/library/metadata/1001");
-    assert.equal(params?.channelKey, "/livetv/channels/ch-tnt");
+    assert.equal(params?.programKey, "plex%3A%2F%2Fepisode%2Fabc");
+    assert.equal(params?.channelKey, "ch-tnt");
   });
 
   it("sends negative startTimeOffset for pre-roll seconds", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
@@ -234,8 +221,8 @@ describe("schedule_recording", () => {
       register,
       "schedule_recording",
       {
-        program_id: "/library/metadata/1001",
-        channel_id: "/livetv/channels/ch-tnt",
+        program_id: "plex%3A%2F%2Fepisode%2Fabc",
+        channel_id: "ch-tnt",
         start_offset_seconds: 30,
         end_offset_seconds: 120,
       },
@@ -252,7 +239,6 @@ describe("schedule_recording", () => {
 describe("cancel_recording", () => {
   it("cancels a recording successfully", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(`${SUBS_PATH}/42`, { MediaContainer: {} });
     const { text, isError } = await callTool(
       register,
@@ -273,7 +259,6 @@ describe("cancel_recording", () => {
       { subscription_id: "../secrets" },
       client
     );
-    // Zod validation rejects non-numeric — MCP returns an error
     assert.equal(isError, true);
   });
 
@@ -288,22 +273,8 @@ describe("cancel_recording", () => {
     assert.equal(isError, true);
   });
 
-  it("returns not-configured message when DVR not available", async () => {
-    const client = makeMockClient();
-    client.setError("/livetv/dvr", 404, "Not found");
-    const { text, isError } = await callTool(
-      register,
-      "cancel_recording",
-      { subscription_id: "42" },
-      client
-    );
-    assert.equal(isError, false);
-    assert.match(text, /not configured/i);
-  });
-
   it("returns error on API failure (e.g. subscription not found)", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setError(`${SUBS_PATH}/999`, 404, "Subscription not found");
     const { isError, text } = await callTool(
       register,
@@ -316,55 +287,11 @@ describe("cancel_recording", () => {
   });
 });
 
-// ── device.key sanitization ───────────────────────────────────────────────────
-
-describe("device key sanitization", () => {
-  it("uses fallback path when device.key contains path traversal", async () => {
-    const client = makeMockClient();
-    client.setResponse("/livetv/dvr", {
-      MediaContainer: { DVRDevice: [{ key: "../../secrets" }] },
-    });
-    client.setResponse("/livetv/dvr/subscriptions", {
-      MediaContainer: { MediaSubscription: [] },
-    });
-    const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
-    assert.equal(isError, false);
-    assert.match(text, /No scheduled recordings/);
-  });
-
-  it("uses fallback path when device.key contains a protocol", async () => {
-    const client = makeMockClient();
-    client.setResponse("/livetv/dvr", {
-      MediaContainer: { DVRDevice: [{ key: "http://evil.example/path" }] },
-    });
-    client.setResponse("/livetv/dvr/subscriptions", {
-      MediaContainer: { MediaSubscription: [] },
-    });
-    const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
-    assert.equal(isError, false);
-    assert.match(text, /No scheduled recordings/);
-  });
-
-  it("accepts a valid device.key starting with /", async () => {
-    const client = makeMockClient();
-    client.setResponse("/livetv/dvr", {
-      MediaContainer: { DVRDevice: [{ key: "/livetv/dvr/42" }] },
-    });
-    client.setResponse("/livetv/dvr/42/subscriptions", {
-      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
-    });
-    const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
-    assert.equal(isError, false);
-    assert.match(text, /National Treasure/);
-  });
-});
-
-// ── formatting edge cases ─────────────────────────────────────────────────────
+// ── dvr formatting edge cases ─────────────────────────────────────────────────
 
 describe("dvr formatting edge cases", () => {
   it("formatSubscription: missing id shows ? placeholder", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [{ title: "No ID Show" }] },
     });
@@ -374,7 +301,6 @@ describe("dvr formatting edge cases", () => {
 
   it("schedule_recording: subscription missing startTime/endTime omits those lines", async () => {
     const client = makeMockClient();
-    client.setResponse("/livetv/dvr", DVR_DEVICE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: {
         MediaSubscription: [{ id: "7", title: "Sparse" }],
@@ -383,7 +309,7 @@ describe("dvr formatting edge cases", () => {
     const { text } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "5", channel_id: "/livetv/channels/ch-x" },
+      { program_id: "5", channel_id: "ch-x" },
       client
     );
     assert.doesNotMatch(text, /Starts:/);
