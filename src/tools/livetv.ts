@@ -205,30 +205,29 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
           return { content: [{ type: "text", text: NOT_CONFIGURED }] };
         }
 
-        // Prefer the guide feature's declared path; fall back to provider-derived path.
-        // Plex uses type "guide" or "content" for the EPG items feature.
+        // Plex cloud EPG uses type "grid" with gridStart/gridEnd params.
+        // Older/local EPG may use type "guide". "content" and "items" features
+        // lead to section-list endpoints, not guide data — skip them.
         const guideFeature = (epgProvider.Feature ?? []).find(
           (f) =>
+            String(f.type ?? "").toLowerCase() === "grid" ||
+            String(f.key ?? "")
+              .toLowerCase()
+              .includes("/grid") ||
             String(f.type ?? "")
               .toLowerCase()
               .includes("guide") ||
-            String(f.type ?? "").toLowerCase() === "content" ||
-            String(f.key ?? "")
-              .toLowerCase()
-              .includes("items") ||
             String(f.key ?? "")
               .toLowerCase()
               .includes("guide")
         );
         const providerId = String(epgProvider.identifier ?? "tv.plex.provider.epg");
-        const guidePath = guideFeature?.key
-          ? String(guideFeature.key)
-          : `/media/providers/${providerId}/items`;
+        const guidePath = guideFeature?.key ? String(guideFeature.key) : `/${providerId}/grid`;
 
         // Plex type codes: 1 = movie, 4 = episode
         const params: Record<string, string> = {
-          startDate: Math.floor(startMs / 1000).toString(),
-          stopDate: Math.floor(endMs / 1000).toString(),
+          gridStart: Math.floor(startMs / 1000).toString(),
+          gridEnd: Math.floor(endMs / 1000).toString(),
         };
         if (args.channel_id) params.channelKey = args.channel_id;
         if (args.type === "movie") params.type = "1";

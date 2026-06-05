@@ -5,12 +5,14 @@ import { makeMockClient, callTool, type RegisterFn } from "./helpers.js";
 
 const register: RegisterFn = registerLiveTvTools;
 
+// Production Plex cloud EPG uses type "grid" and a path like
+// /{identifier}/grid. This is what the real /media/providers returns.
 const PROVIDERS_WITH_EPG = {
   MediaContainer: {
     MediaProvider: [
       {
         identifier: "tv.plex.provider.epg",
-        Feature: [{ key: "/media/providers/tv.plex.provider.epg/items", type: "guide" }],
+        Feature: [{ key: "/tv.plex.provider.epg/grid", type: "grid" }],
       },
     ],
   },
@@ -21,6 +23,9 @@ const PROVIDERS_WITHOUT_EPG = {
     MediaProvider: [{ identifier: "tv.plex.provider.movies" }],
   },
 };
+
+// Guide data endpoint path derived from PROVIDERS_WITH_EPG feature key.
+const GUIDE_PATH = "/tv.plex.provider.epg/grid";
 
 function makeProgram(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -74,7 +79,7 @@ describe("get_live_tv_guide", () => {
   it("returns programs in the guide window", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: { Metadata: [makeProgram()] },
     });
     const { text, isError } = await callTool(register, "get_live_tv_guide", {}, client);
@@ -106,7 +111,7 @@ describe("get_live_tv_guide", () => {
   it("returns no-results message when guide is empty", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: { Metadata: [] },
     });
     const { text } = await callTool(register, "get_live_tv_guide", {}, client);
@@ -116,7 +121,7 @@ describe("get_live_tv_guide", () => {
   it("returns error on unexpected API failure", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setError("/media/providers/tv.plex.provider.epg/items", 500, "Internal error");
+    client.setError(GUIDE_PATH, 500, "Internal error");
     const { isError } = await callTool(register, "get_live_tv_guide", {}, client);
     assert.equal(isError, true);
   });
@@ -124,7 +129,7 @@ describe("get_live_tv_guide", () => {
   it("returns diagnostic message when guide path returns 404", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setError("/media/providers/tv.plex.provider.epg/items", 404, "Not found");
+    client.setError(GUIDE_PATH, 404, "Not found");
     const { isError, text } = await callTool(register, "get_live_tv_guide", {}, client);
     assert.equal(isError, true);
     assert.match(text, /404/);
@@ -139,7 +144,7 @@ describe("get_live_tv_guide", () => {
         MediaProvider: [{ identifier: "tv.plex.provider.epg.ota" }],
       },
     });
-    client.setResponse("/media/providers/tv.plex.provider.epg.ota/items", {
+    client.setResponse("/tv.plex.provider.epg.ota/grid", {
       MediaContainer: { Metadata: [makeProgram()] },
     });
     const { text, isError } = await callTool(register, "get_live_tv_guide", {}, client);
@@ -147,19 +152,39 @@ describe("get_live_tv_guide", () => {
     assert.match(text, /National Treasure/);
   });
 
-  it("matches feature with type content", async () => {
+  it("matches feature with type grid", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", {
       MediaContainer: {
         MediaProvider: [
           {
             identifier: "tv.plex.provider.epg",
-            Feature: [{ key: "/media/providers/tv.plex.provider.epg/items", type: "content" }],
+            Feature: [{ key: "/tv.plex.provider.epg/grid", type: "grid" }],
           },
         ],
       },
     });
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse("/tv.plex.provider.epg/grid", {
+      MediaContainer: { Metadata: [makeProgram()] },
+    });
+    const { text, isError } = await callTool(register, "get_live_tv_guide", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /National Treasure/);
+  });
+
+  it("matches feature with type guide (older Plex installations)", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", {
+      MediaContainer: {
+        MediaProvider: [
+          {
+            identifier: "tv.plex.provider.epg",
+            Feature: [{ key: "/tv.plex.provider.epg/guide/items", type: "guide" }],
+          },
+        ],
+      },
+    });
+    client.setResponse("/tv.plex.provider.epg/guide/items", {
       MediaContainer: { Metadata: [makeProgram()] },
     });
     const { text, isError } = await callTool(register, "get_live_tv_guide", {}, client);
@@ -170,7 +195,7 @@ describe("get_live_tv_guide", () => {
   it("formats episode with show/season/episode prefix", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: { Metadata: [makeEpisode()] },
     });
     const { text } = await callTool(register, "get_live_tv_guide", {}, client);
@@ -182,7 +207,7 @@ describe("get_live_tv_guide", () => {
   it("filters by query (title match)", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: {
         Metadata: [makeProgram(), makeProgram({ ratingKey: "1002", title: "Die Hard" })],
       },
@@ -196,7 +221,7 @@ describe("get_live_tv_guide", () => {
   it("filters by query matching grandparentTitle (show name)", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: {
         Metadata: [makeEpisode(), makeProgram()],
       },
@@ -209,7 +234,7 @@ describe("get_live_tv_guide", () => {
   it("filters by genre", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: {
         Metadata: [
           makeProgram({ Genre: [{ tag: "Adventure" }] }),
@@ -251,7 +276,7 @@ describe("get_live_tv_guide", () => {
         },
       ],
     });
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: { Metadata: [later, earlier] },
     });
     const { text } = await callTool(register, "get_live_tv_guide", {}, client);
@@ -265,7 +290,7 @@ describe("get_live_tv_guide", () => {
         MediaProvider: [{ identifier: "tv.plex.provider.epg" }],
       },
     });
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse("/tv.plex.provider.epg/grid", {
       MediaContainer: { Metadata: [makeProgram()] },
     });
     const { text } = await callTool(register, "get_live_tv_guide", {}, client);
@@ -275,7 +300,7 @@ describe("get_live_tv_guide", () => {
   it("includes program count and time window in header", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: { Metadata: [makeProgram(), makeEpisode()] },
     });
     const { text } = await callTool(register, "get_live_tv_guide", {}, client);
@@ -285,7 +310,7 @@ describe("get_live_tv_guide", () => {
   it("shows rating when present", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: { Metadata: [makeProgram({ rating: 7.5 })] },
     });
     const { text } = await callTool(register, "get_live_tv_guide", {}, client);
@@ -295,7 +320,7 @@ describe("get_live_tv_guide", () => {
   it("uses key field as Program ID when present", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: {
         Metadata: [
           { ratingKey: "999", key: "/library/metadata/999", title: "A Movie", type: "movie" },
@@ -309,7 +334,7 @@ describe("get_live_tv_guide", () => {
   it("falls back to ratingKey as Program ID when key is absent", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: {
         Metadata: [{ ratingKey: "888", title: "Old Entry", type: "movie" }],
       },
@@ -322,7 +347,7 @@ describe("get_live_tv_guide", () => {
   it("handles program with no Media gracefully", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+    client.setResponse(GUIDE_PATH, {
       MediaContainer: {
         Metadata: [{ ratingKey: "5", title: "No Schedule", type: "movie" }],
       },
