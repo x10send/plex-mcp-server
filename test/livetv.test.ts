@@ -88,7 +88,7 @@ describe("get_live_tv_guide", () => {
     assert.match(text, /TNT/);
     assert.match(text, /PG/);
     assert.match(text, /Adventure/);
-    assert.match(text, /Program ID: \/library\/metadata\/1001/);
+    assert.match(text, /program_id: 1001/);
   });
 
   it("returns not-configured message when no EPG provider", async () => {
@@ -200,7 +200,7 @@ describe("get_live_tv_guide", () => {
     const { text } = await callTool(register, "get_live_tv_guide", {}, client);
     assert.match(text, /Breaking Bad S1E1: Pilot/);
     assert.match(text, /AMC/);
-    assert.match(text, /Program ID: \/library\/metadata\/2001/);
+    assert.match(text, /program_id: 2001/);
   });
 
   it("filters by query (title match)", async () => {
@@ -314,34 +314,60 @@ describe("get_live_tv_guide", () => {
     assert.match(text, /★7\.5/);
   });
 
-  it("uses key field as Program ID when present", async () => {
+  it("uses ratingKey as program_id (preferred over key)", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
     client.setResponse(GUIDE_PATH, {
       MediaContainer: {
         Metadata: [
-          { ratingKey: "999", key: "/library/metadata/999", title: "A Movie", type: "movie" },
+          {
+            ratingKey: "999",
+            key: "/library/metadata/999",
+            title: "A Movie",
+            type: "movie",
+            Media: [
+              {
+                channelCallSign: "TEST",
+                channelIdentifier: "ch-test",
+                beginsAt: 1717200000,
+                endsAt: 1717207200,
+              },
+            ],
+          },
         ],
       },
     });
     const { text } = await callTool(register, "get_live_tv_guide", {}, client);
-    assert.match(text, /Program ID: \/library\/metadata\/999/);
+    assert.match(text, /program_id: 999/);
   });
 
-  it("falls back to ratingKey as Program ID when key is absent", async () => {
+  it("falls back to key as program_id when ratingKey is absent", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
     client.setResponse(GUIDE_PATH, {
       MediaContainer: {
-        Metadata: [{ ratingKey: "888", title: "Old Entry", type: "movie" }],
+        Metadata: [
+          {
+            key: "/library/metadata/888",
+            title: "Old Entry",
+            type: "movie",
+            Media: [
+              {
+                channelCallSign: "TEST",
+                channelIdentifier: "ch-test",
+                beginsAt: 1717200000,
+                endsAt: 1717207200,
+              },
+            ],
+          },
+        ],
       },
     });
     const { text } = await callTool(register, "get_live_tv_guide", {}, client);
-    assert.match(text, /Program ID: 888/);
-    assert.doesNotMatch(text, /library\/metadata/);
+    assert.match(text, /program_id: \/library\/metadata\/888/);
   });
 
-  it("handles program with no Media gracefully", async () => {
+  it("handles program with no Media gracefully (filtered out)", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
     client.setResponse(GUIDE_PATH, {
@@ -351,7 +377,8 @@ describe("get_live_tv_guide", () => {
     });
     const { text, isError } = await callTool(register, "get_live_tv_guide", {}, client);
     assert.equal(isError, false);
-    assert.match(text, /No Schedule/);
+    assert.match(text, /No programs found/);
+    assert.doesNotMatch(text, /No Schedule/);
   });
 
   it("tries second provider when first returns 404", async () => {
@@ -406,33 +433,45 @@ describe("get_live_tv_guide", () => {
     assert.match(text, /National Treasure/);
   });
 
-  it("sends type=1 param for movie filter", async () => {
+  it("type=movie filter keeps only movies (client-side)", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse(GUIDE_PATH, { MediaContainer: { Metadata: [makeProgram()] } });
-    await callTool(register, "get_live_tv_guide", { type: "movie" }, client);
-    assert.equal(client.getLastGetParams()?.["type"], "1");
+    client.setResponse(GUIDE_PATH, {
+      MediaContainer: { Metadata: [makeProgram(), makeEpisode()] },
+    });
+    const { text } = await callTool(register, "get_live_tv_guide", { type: "movie" }, client);
+    assert.match(text, /National Treasure/);
+    assert.doesNotMatch(text, /Breaking Bad/);
+    assert.equal(client.getLastGetParams()?.["type"], undefined);
   });
 
-  it("sends type=4 param for episode filter", async () => {
+  it("type=episode filter keeps only episodes (client-side)", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse(GUIDE_PATH, { MediaContainer: { Metadata: [makeProgram()] } });
-    await callTool(register, "get_live_tv_guide", { type: "episode" }, client);
-    assert.equal(client.getLastGetParams()?.["type"], "4");
+    client.setResponse(GUIDE_PATH, {
+      MediaContainer: { Metadata: [makeProgram(), makeEpisode()] },
+    });
+    const { text } = await callTool(register, "get_live_tv_guide", { type: "episode" }, client);
+    assert.doesNotMatch(text, /National Treasure/);
+    assert.match(text, /Breaking Bad/);
+    assert.equal(client.getLastGetParams()?.["type"], undefined);
   });
 
-  it("sends channelKey param when channel_id is provided", async () => {
+  it("channel_id filter keeps only matching channel programs (client-side)", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
-    client.setResponse(GUIDE_PATH, { MediaContainer: { Metadata: [makeProgram()] } });
-    await callTool(
+    client.setResponse(GUIDE_PATH, {
+      MediaContainer: { Metadata: [makeProgram(), makeEpisode()] },
+    });
+    const { text } = await callTool(
       register,
       "get_live_tv_guide",
-      { channel_id: "/livetv/channels/ch-tnt" },
+      { channel_id: "ch-tnt" },
       client
     );
-    assert.equal(client.getLastGetParams()?.["channelKey"], "/livetv/channels/ch-tnt");
+    assert.match(text, /National Treasure/);
+    assert.doesNotMatch(text, /Breaking Bad/);
+    assert.equal(client.getLastGetParams()?.["channelKey"], undefined);
   });
 
   it("sends correct beginsAt> and endsAt< params for time window", async () => {

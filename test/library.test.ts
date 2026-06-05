@@ -332,7 +332,7 @@ describe("get_library_contents", () => {
     assert.match(text, /No items found/);
   });
 
-  it("passes videoResolution=1080 to server for resolution=1080p", async () => {
+  it("does not pass videoResolution param for resolution=1080p (client-side only)", async () => {
     const client = makeMockClient();
     client.setResponse("/library/sections/1/all", {
       MediaContainer: { totalSize: 0, Metadata: [] },
@@ -343,10 +343,10 @@ describe("get_library_contents", () => {
       { section_id: "1", resolution: "1080p" },
       client
     );
-    assert.equal(client.getLastGetParams()?.["videoResolution"], "1080");
+    assert.equal(client.getLastGetParams()?.["videoResolution"], undefined);
   });
 
-  it("passes videoResolution=720 to server for resolution=720p", async () => {
+  it("does not pass videoResolution param for resolution=720p (client-side only)", async () => {
     const client = makeMockClient();
     client.setResponse("/library/sections/1/all", {
       MediaContainer: { totalSize: 0, Metadata: [] },
@@ -357,16 +357,16 @@ describe("get_library_contents", () => {
       { section_id: "1", resolution: "720p" },
       client
     );
-    assert.equal(client.getLastGetParams()?.["videoResolution"], "720");
+    assert.equal(client.getLastGetParams()?.["videoResolution"], undefined);
   });
 
-  it("passes videoResolution=4k to server for resolution=4k", async () => {
+  it("does not pass videoResolution param for resolution=4k (client-side only)", async () => {
     const client = makeMockClient();
     client.setResponse("/library/sections/1/all", {
       MediaContainer: { totalSize: 0, Metadata: [] },
     });
     await callTool(register, "get_library_contents", { section_id: "1", resolution: "4k" }, client);
-    assert.equal(client.getLastGetParams()?.["videoResolution"], "4k");
+    assert.equal(client.getLastGetParams()?.["videoResolution"], undefined);
   });
 
   it("does not pass videoResolution param for resolution=sd (client-side only)", async () => {
@@ -376,6 +376,37 @@ describe("get_library_contents", () => {
     });
     await callTool(register, "get_library_contents", { section_id: "1", resolution: "sd" }, client);
     assert.equal(client.getLastGetParams()?.["videoResolution"], undefined);
+  });
+
+  it("4k filter matches videoResolution=2160", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 2,
+        Metadata: [
+          {
+            ratingKey: "40",
+            title: "UHD Film",
+            type: "movie",
+            Media: [{ videoResolution: "2160", bitrate: 40000 }],
+          },
+          {
+            ratingKey: "41",
+            title: "Standard Film",
+            type: "movie",
+            Media: [{ videoResolution: "1080", bitrate: 8000 }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "4k" },
+      client
+    );
+    assert.match(text, /UHD Film/);
+    assert.doesNotMatch(text, /Standard Film/);
   });
 });
 

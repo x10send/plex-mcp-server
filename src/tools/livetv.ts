@@ -9,23 +9,26 @@ interface EpgMedia {
   channelCallSign?: unknown;
   channelIdentifier?: unknown;
   channelVcn?: unknown;
+  channelTitle?: unknown;
+  gridKey?: unknown;
   beginsAt?: unknown; // unix seconds
   endsAt?: unknown; // unix seconds
+  duration?: unknown; // milliseconds
 }
 
 interface EpgProgram {
   ratingKey?: unknown;
-  key?: unknown; // full metadata path, e.g. /library/metadata/12345 — used as programKey for DVR
+  key?: unknown;
   title?: unknown;
   type?: unknown;
   year?: unknown;
   summary?: unknown;
   contentRating?: unknown;
   rating?: unknown;
-  grandparentTitle?: unknown; // show name for episodes
-  parentTitle?: unknown; // season label
-  parentIndex?: unknown; // season number
-  index?: unknown; // episode number
+  grandparentTitle?: unknown;
+  parentTitle?: unknown;
+  parentIndex?: unknown;
+  index?: unknown;
   Genre?: Array<{ tag?: unknown }>;
   Media?: EpgMedia[];
 }
@@ -51,6 +54,14 @@ interface GuideResponse {
   MediaContainer: { Metadata?: EpgProgram[]; [key: string]: unknown };
 }
 
+interface ChannelGroup {
+  vcnNum: number;
+  vcn: string;
+  title: string;
+  id: string;
+  programs: EpgProgram[];
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 function parseTimestamp(val: string | undefined): number | undefined {
@@ -60,7 +71,8 @@ function parseTimestamp(val: string | undefined): number | undefined {
   return isNaN(d.getTime()) ? undefined : d.getTime();
 }
 
-function formatTime(epochMs: number): string {
+// Full date + time for the guide window header.
+function formatDateTime(epochMs: number): string {
   const d = new Date(epochMs);
   const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   const months = [
@@ -77,55 +89,81 @@ function formatTime(epochMs: number): string {
     "Nov",
     "Dec",
   ];
-  const h = d.getUTCHours();
-  const m = d.getUTCMinutes().toString().padStart(2, "0");
+  const h = d.getHours();
+  const m = d.getMinutes().toString().padStart(2, "0");
   const ampm = h >= 12 ? "PM" : "AM";
   const h12 = h % 12 || 12;
-  return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${h12}:${m} ${ampm} UTC`;
+  return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}, ${h12}:${m} ${ampm}`;
+}
+
+// Short time-only for per-program listings within a channel group.
+function formatTimeShort(epochMs: number): string {
+  const d = new Date(epochMs);
+  const h = d.getHours();
+  const m = d.getMinutes().toString().padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  return `${h12}:${m} ${ampm}`;
 }
 
 function formatProgram(p: EpgProgram): string {
-  const title = String(p.title ?? "Unknown");
-  const type = String(p.type ?? "?");
+  const media = p.Media![0];
+  const startsMs = Number(media.beginsAt) * 1000;
+  const endsMs = Number(media.endsAt) * 1000;
+  const durMs = Number(media.duration ?? 0);
+  const durMin = durMs > 0 ? ` (${Math.round(durMs / 60000)} min)` : "";
+
+  const showName = p.grandparentTitle ? String(p.grandparentTitle) : null;
+  const epTitle = String(p.title ?? "Unknown");
+  let displayTitle: string;
+  if (showName && showName !== epTitle) {
+    const season = p.parentIndex !== undefined ? `S${p.parentIndex}` : "";
+    const ep = p.index !== undefined ? `E${p.index}` : "";
+    const seEp = season || ep ? ` ${season}${ep}` : "";
+    displayTitle = `${showName}${seEp}: ${epTitle}`;
+  } else {
+    displayTitle = epTitle;
+  }
+
   const year = p.year ? ` (${p.year})` : "";
-  const rating = p.rating ? ` | ★${Number(p.rating).toFixed(1)}` : "";
-  const contentRating = p.contentRating ? ` | ${p.contentRating}` : "";
-
-  const episodePrefix = p.grandparentTitle
-    ? `${p.grandparentTitle}` +
-      (p.parentIndex !== undefined ? ` S${p.parentIndex}` : "") +
-      (p.index !== undefined ? `E${p.index}` : "") +
-      ": "
-    : "";
-
+  const cr = p.contentRating ? ` [${p.contentRating}]` : "";
+  const rating = p.rating ? ` ★${Number(p.rating).toFixed(1)}` : "";
   const genres = (p.Genre ?? [])
     .map((g) => String(g.tag ?? ""))
     .filter(Boolean)
-    .join(", ");
-
-  const media = p.Media?.[0];
-  const startsMs = media?.beginsAt !== undefined ? Number(media.beginsAt) * 1000 : undefined;
-  const endsMs = media?.endsAt !== undefined ? Number(media.endsAt) * 1000 : undefined;
-  // Prefer the full key path (what Plex needs as programKey for DVR scheduling)
-  const programId = p.key ?? p.ratingKey;
-
-  const details = [
-    media?.channelCallSign ? `  Channel: ${media.channelCallSign}` : "",
-    media?.channelIdentifier ? `  Channel ID: ${String(media.channelIdentifier)}` : "",
-    startsMs !== undefined
-      ? `  Airs: ${formatTime(startsMs)}${endsMs !== undefined ? ` → ${formatTime(endsMs)}` : ""}`
-      : "",
-    genres ? `  Genre: ${genres}` : "",
-    p.summary ? `  ${String(p.summary).slice(0, 200)}` : "",
-    programId ? `  Program ID: ${programId}` : "",
-  ]
-    .filter(Boolean)
-    .join("\n");
+    .join("/");
+  const genreStr = genres ? ` | ${genres}` : "";
+  const progId = String(p.ratingKey ?? p.key ?? "?");
+  const timeStr = `${formatTimeShort(startsMs)} – ${formatTimeShort(endsMs)}`;
 
   return (
-    `${episodePrefix}${title}${year} [${type}]${rating}${contentRating}` +
-    (details ? `\n${details}` : "")
+    `  ${timeStr}  ${displayTitle}${year}${durMin}${cr}${rating}${genreStr}\n` +
+    `    program_id: ${progId}`
   );
+}
+
+function groupByChannel(programs: EpgProgram[]): ChannelGroup[] {
+  const map = new Map<string, ChannelGroup>();
+  for (const p of programs) {
+    const media = p.Media?.[0];
+    if (!media) continue;
+    const id = String(media.channelIdentifier ?? media.channelCallSign ?? "unknown");
+    const vcn = String(media.channelVcn ?? "");
+    const title = String(media.channelTitle ?? media.channelCallSign ?? "Unknown Channel");
+    if (!map.has(id)) {
+      map.set(id, { vcnNum: parseFloat(vcn) || 0, vcn, title, id, programs: [] });
+    }
+    map.get(id)!.programs.push(p);
+  }
+  const channels = [...map.values()].sort(
+    (a, b) => a.vcnNum - b.vcnNum || a.vcn.localeCompare(b.vcn) || a.title.localeCompare(b.title)
+  );
+  for (const ch of channels) {
+    ch.programs.sort(
+      (a, b) => Number(a.Media?.[0]?.beginsAt ?? 0) - Number(b.Media?.[0]?.beginsAt ?? 0)
+    );
+  }
+  return channels;
 }
 
 const NOT_CONFIGURED =
@@ -138,16 +176,16 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
   server.tool(
     "get_live_tv_guide",
     [
-      "Browse the Plex Live TV program guide. Supports flexible time windows, channel filtering, title search, content-type filtering, and genre filtering.",
+      "Browse the Plex Live TV program guide grouped by channel.",
       "Default window is now → next 4 hours. Extend up to 7 days (hours=168) for movie hunting.",
-      "Returns channel, air times, rating, genre, summary, and Program ID needed to schedule a DVR recording.",
+      "Returns program_id and channel_id needed to call schedule_recording directly.",
     ].join(" "),
     {
       channel_id: z
         .string()
         .optional()
         .describe(
-          "Plex channel key to restrict results to one channel (e.g. /livetv/channels/abc123)"
+          "Filter to one channel — pass the channel_id value from a previous guide result (the channelIdentifier field)"
         ),
       start: z
         .string()
@@ -191,7 +229,6 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
       const endMs = parseTimestamp(args.end) ?? startMs + hours * 3600 * 1000;
 
       try {
-        // Discover EPG provider — also confirms Live TV is configured
         let providers: ProvidersResponse;
         try {
           providers = await client.get<ProvidersResponse>("/media/providers");
@@ -209,20 +246,17 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
 
         // Plex EPG grid uses comparison-operator params: beginsAt> and endsAt<
         // (URL-encoded as beginsAt%3E and endsAt%3C on the wire).
-        // gridStart/gridEnd are silently ignored and return empty results.
+        // gridStart/gridEnd are silently ignored by the cloud EPG and return empty results.
+        // type and channelKey server params are not reliably supported — filter client-side.
         const params: Record<string, string> = {
           "beginsAt>": Math.floor(startMs / 1000).toString(),
           "endsAt<": Math.floor(endMs / 1000).toString(),
         };
-        if (args.channel_id) params.channelKey = args.channel_id;
-        if (args.type === "movie") params.type = "1";
-        else if (args.type === "episode") params.type = "4";
 
         let programs: EpgProgram[] = [];
         const triedPaths: string[] = [];
         let anySucceeded = false;
 
-        // debug mode: collect raw provider and response data for diagnosis
         const debugLines: string[] = [];
         if (args.debug) {
           debugLines.push(`=== EPG Debug Report ===`);
@@ -246,9 +280,6 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
         }
 
         for (const epgProvider of epgProviders) {
-          // Plex cloud EPG uses type "grid" with beginsAt>/endsAt< params.
-          // Older/local EPG may use type "guide". "content" and "items" features
-          // lead to section-list endpoints, not guide data — skip them.
           const guideFeature = (epgProvider.Feature ?? []).find(
             (f) =>
               String(f.type ?? "").toLowerCase() === "grid" ||
@@ -275,7 +306,6 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
               const containerKeys = Object.keys(guide.MediaContainer ?? {});
               debugLines.push(`  MediaContainer keys: ${containerKeys.join(", ")}`);
               debugLines.push(`  Metadata count: ${results.length}`);
-              // Dump full raw container (truncated) so we can see what fields Plex returns
               const raw = JSON.stringify(guide.MediaContainer).slice(0, 2000);
               debugLines.push(`  Raw (first 2000 chars):\n${raw}`);
             }
@@ -312,7 +342,11 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
           };
         }
 
-        // Client-side filters (Plex may not support all server-side)
+        // Drop items with no Media — they have no air time and cannot be scheduled.
+        programs = programs.filter((p) => p.Media && p.Media.length > 0);
+
+        // All filters are client-side — the cloud EPG grid returns the full set
+        // and does not reliably honour server-side type/channel params.
         if (args.query) {
           const q = args.query.toLowerCase();
           programs = programs.filter((p) => {
@@ -320,6 +354,9 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
             const show = String(p.grandparentTitle ?? "").toLowerCase();
             return title.includes(q) || show.includes(q);
           });
+        }
+        if (args.type) {
+          programs = programs.filter((p) => String(p.type ?? "") === args.type);
         }
         if (args.genre) {
           const g = args.genre.toLowerCase();
@@ -331,6 +368,15 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
             )
           );
         }
+        if (args.channel_id) {
+          programs = programs.filter((p) => {
+            const media = p.Media?.[0];
+            return (
+              String(media?.channelIdentifier ?? "") === args.channel_id ||
+              String(media?.gridKey ?? "") === args.channel_id
+            );
+          });
+        }
 
         if (programs.length === 0) {
           return {
@@ -339,7 +385,7 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
                 type: "text",
                 text:
                   "No programs found matching your criteria in the requested time window.\n" +
-                  `Searched: ${formatTime(startMs)} → ${formatTime(endMs)}\n` +
+                  `Searched: ${formatDateTime(startMs)} → ${formatDateTime(endMs)}\n` +
                   `Guide paths tried: ${triedPaths.join(", ")}\n` +
                   "If the guide appears empty, try refreshing EPG data in Plex (Settings → Live TV & DVR → Refresh Guide Data).",
               },
@@ -347,18 +393,20 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
           };
         }
 
-        // Sort by air time
-        programs.sort((a, b) => {
-          const aTime = Number(a.Media?.[0]?.beginsAt ?? 0);
-          const bTime = Number(b.Media?.[0]?.beginsAt ?? 0);
-          return aTime - bTime;
-        });
+        const channels = groupByChannel(programs);
+        const totalPrograms = channels.reduce((n, ch) => n + ch.programs.length, 0);
+        const window = `${formatDateTime(startMs)} → ${formatDateTime(endMs)}`;
+        const headerLine = `Guide: ${totalPrograms} program${totalPrograms !== 1 ? "s" : ""} on ${channels.length} channel${channels.length !== 1 ? "s" : ""} (${window})\n\n`;
 
-        const window = `${formatTime(startMs)} → ${formatTime(endMs)}`;
-        const header = `Guide: ${programs.length} program${programs.length === 1 ? "" : "s"} (${window})\n\n`;
-        const body = programs.map((p) => formatProgram(p)).join("\n\n");
+        const body = channels
+          .map((ch) => {
+            const chHeader = `📺 ${ch.title} [channel_id: ${ch.id}]`;
+            const progLines = ch.programs.map((p) => formatProgram(p)).join("\n");
+            return `${chHeader}\n${progLines}`;
+          })
+          .join("\n\n");
 
-        return { content: [{ type: "text", text: header + body }] };
+        return { content: [{ type: "text", text: headerLine + body }] };
       } catch (err) {
         return toolError(err);
       }

@@ -63,7 +63,7 @@ function displayCodec(codec: string): string {
 
 function formatResolution(r: unknown): string {
   const s = String(r).toLowerCase();
-  if (s === "4k") return "4K";
+  if (s === "4k" || s === "2160") return "4K";
   if (s === "1080") return "1080p";
   if (s === "720") return "720p";
   if (s === "480") return "480p";
@@ -97,7 +97,7 @@ function matchesResolutionFilter(videoResolution: unknown, filter: string): bool
   const r = String(videoResolution ?? "").toLowerCase();
   switch (filter) {
     case "4k":
-      return r === "4k";
+      return r === "4k" || r === "2160";
     case "1080p":
       return r === "1080";
     case "720p":
@@ -260,12 +260,6 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
         if (content_rating) params["contentRating"] = content_rating;
         if (studio) params["studio"] = studio;
         if (sort) params["sort"] = sort;
-        // Push 4k/1080p/720p to server-side so totalSize reflects the filtered count
-        // and pagination works over the filtered subset. SD stays client-side because
-        // it means "not HD" and can't be expressed as a single videoResolution value.
-        if (resolution === "4k") params["videoResolution"] = "4k";
-        else if (resolution === "1080p") params["videoResolution"] = "1080";
-        else if (resolution === "720p") params["videoResolution"] = "720";
 
         const data = await client.get<
           PlexMediaContainer<{ totalSize?: number; Metadata?: MediaItem[] }>
@@ -273,8 +267,6 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
         let items = data.MediaContainer.Metadata ?? [];
         const total = data.MediaContainer.totalSize ?? items.length;
 
-        // Client-side resolution guard: redundant for 4k/1080p/720p (server already filtered)
-        // but necessary for sd ("not HD") which has no server-side equivalent.
         if (resolution !== undefined) {
           items = items.filter((item) => {
             const r = item.Media?.[0]?.videoResolution;
@@ -291,7 +283,7 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
         if (items.length === 0)
           return { content: [{ type: "text", text: "No items found matching the criteria." }] };
         const lines = items.map(formatItem);
-        const isClientFiltered = resolution === "sd" || min_bitrate !== undefined;
+        const isClientFiltered = resolution !== undefined || min_bitrate !== undefined;
         const range = isClientFiltered
           ? `${items.length} matching; library total: ${total}`
           : `${offset}–${offset + items.length} of ${total}`;
