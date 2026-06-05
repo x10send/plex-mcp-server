@@ -128,7 +128,7 @@ function formatProgram(p: EpgProgram): string {
   const year = p.year ? ` (${p.year})` : "";
   const cr = p.contentRating ? ` [${p.contentRating}]` : "";
   const rating = p.rating ? ` ★${Number(p.rating).toFixed(1)}` : "";
-  const genres = (p.Genre ?? [])
+  const genres = (Array.isArray(p.Genre) ? p.Genre : [])
     .map((g) => String(g.tag ?? ""))
     .filter(Boolean)
     .join("/");
@@ -236,9 +236,11 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
           return { content: [{ type: "text", text: NOT_CONFIGURED }] };
         }
 
-        const epgProviders = (providers.MediaContainer?.MediaProvider ?? []).filter((p) =>
-          String(p.identifier ?? "").includes("epg")
-        );
+        const epgProviders = (
+          Array.isArray(providers.MediaContainer?.MediaProvider)
+            ? providers.MediaContainer.MediaProvider
+            : []
+        ).filter((p) => String(p.identifier ?? "").includes("epg"));
 
         if (epgProviders.length === 0) {
           return { content: [{ type: "text", text: NOT_CONFIGURED }] };
@@ -265,7 +267,7 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
             debugLines.push(
               `  identifier: ${p.identifier}  title: ${p.title ?? "(none)"}  type: ${p.type ?? "(none)"}`
             );
-            for (const f of p.Feature ?? []) {
+            for (const f of Array.isArray(p.Feature) ? p.Feature : []) {
               debugLines.push(
                 `    feature  type: ${f.type ?? "(none)"}  key: ${f.key ?? "(none)"}`
               );
@@ -280,7 +282,7 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
         }
 
         for (const epgProvider of epgProviders) {
-          const guideFeature = (epgProvider.Feature ?? []).find(
+          const guideFeature = (Array.isArray(epgProvider.Feature) ? epgProvider.Feature : []).find(
             (f) =>
               String(f.type ?? "").toLowerCase() === "grid" ||
               String(f.key ?? "")
@@ -300,13 +302,15 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
           try {
             const guide = await client.get<GuideResponse>(guidePath, params);
             anySucceeded = true;
-            const results = guide.MediaContainer?.Metadata ?? [];
+            const container = guide?.MediaContainer;
+            const rawMetadata = container?.Metadata;
+            const results = Array.isArray(rawMetadata) ? rawMetadata : [];
             if (args.debug) {
               debugLines.push(`\n-- ${guidePath} → 200 OK --`);
-              const containerKeys = Object.keys(guide.MediaContainer ?? {});
+              const containerKeys = Object.keys(container ?? {});
               debugLines.push(`  MediaContainer keys: ${containerKeys.join(", ")}`);
               debugLines.push(`  Metadata count: ${results.length}`);
-              const raw = JSON.stringify(guide.MediaContainer).slice(0, 2000);
+              const raw = (JSON.stringify(container ?? null) ?? "null").slice(0, 2000);
               debugLines.push(`  Raw (first 2000 chars):\n${raw}`);
             }
             if (results.length > 0) {
@@ -361,7 +365,7 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
         if (args.genre) {
           const g = args.genre.toLowerCase();
           programs = programs.filter((p) =>
-            (p.Genre ?? []).some((genre) =>
+            (Array.isArray(p.Genre) ? p.Genre : []).some((genre) =>
               String(genre.tag ?? "")
                 .toLowerCase()
                 .includes(g)

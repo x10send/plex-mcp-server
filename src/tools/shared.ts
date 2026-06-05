@@ -8,7 +8,9 @@ export function toolError(err: unknown): {
   const msg =
     err instanceof PlexApiError
       ? `Plex API error ${err.status}: ${err.message.slice(0, 200)}`
-      : "Unexpected error contacting Plex";
+      : err instanceof Error
+        ? `Error: ${err.message.slice(0, 200)}`
+        : `Error: ${String(err).slice(0, 200)}`;
   return { content: [{ type: "text", text: msg }], isError: true };
 }
 
