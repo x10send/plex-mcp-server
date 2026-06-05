@@ -406,6 +406,62 @@ describe("get_live_tv_guide", () => {
     assert.match(text, /National Treasure/);
   });
 
+  it("sends type=1 param for movie filter", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
+    client.setResponse(GUIDE_PATH, { MediaContainer: { Metadata: [makeProgram()] } });
+    await callTool(register, "get_live_tv_guide", { type: "movie" }, client);
+    assert.equal(client.getLastGetParams()?.["type"], "1");
+  });
+
+  it("sends type=4 param for episode filter", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
+    client.setResponse(GUIDE_PATH, { MediaContainer: { Metadata: [makeProgram()] } });
+    await callTool(register, "get_live_tv_guide", { type: "episode" }, client);
+    assert.equal(client.getLastGetParams()?.["type"], "4");
+  });
+
+  it("sends channelKey param when channel_id is provided", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
+    client.setResponse(GUIDE_PATH, { MediaContainer: { Metadata: [makeProgram()] } });
+    await callTool(
+      register,
+      "get_live_tv_guide",
+      { channel_id: "/livetv/channels/ch-tnt" },
+      client
+    );
+    assert.equal(client.getLastGetParams()?.["channelKey"], "/livetv/channels/ch-tnt");
+  });
+
+  it("sends correct beginsAt> and endsAt< params for time window", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
+    client.setResponse(GUIDE_PATH, { MediaContainer: { Metadata: [makeProgram()] } });
+    // start=1000000 (Unix seconds), hours=2 → endsAt = 1000000 + 7200 = 1007200
+    await callTool(register, "get_live_tv_guide", { start: "1000000", hours: 2 }, client);
+    const params = client.getLastGetParams();
+    assert.equal(params?.["beginsAt>"], "1000000");
+    assert.equal(params?.["endsAt<"], "1007200");
+  });
+
+  it("debug mode returns diagnostic report instead of formatted programs", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
+    client.setResponse(GUIDE_PATH, { MediaContainer: { Metadata: [makeProgram()] } });
+    const { text, isError } = await callTool(
+      register,
+      "get_live_tv_guide",
+      { debug: true },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /EPG Debug Report/);
+    assert.match(text, /tv\.plex\.provider\.epg/);
+    assert.match(text, /Grid params/);
+  });
+
   it("returns diagnostic error when all EPG providers return 404", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", {

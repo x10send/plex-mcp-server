@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type IPlexClient, PlexApiError } from "../plex-client.js";
+import type { IPlexClient } from "../plex-client.js";
+import { toolError } from "./shared.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,14 +55,6 @@ interface ButlerResponse {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function toolError(err: unknown): { content: [{ type: "text"; text: string }]; isError: true } {
-  const msg =
-    err instanceof PlexApiError
-      ? `Plex API error ${err.status}: ${err.message.slice(0, 200)}`
-      : "Unexpected error contacting Plex";
-  return { content: [{ type: "text", text: msg }], isError: true };
-}
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1_000_000_000) return `${(bytes / 1_000_000_000).toFixed(2)} GB`;

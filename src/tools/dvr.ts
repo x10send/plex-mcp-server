@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type IPlexClient, PlexApiError } from "../plex-client.js";
+import { toolError } from "./shared.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -48,16 +49,13 @@ async function resolveSubscriptionsBase(client: IPlexClient): Promise<string | n
   }
   const device = dvr.MediaContainer?.DVRDevice?.[0];
   if (!device) return null; // endpoint exists, but no device paired
-  if (device.key) return `${String(device.key)}/subscriptions`;
-  return "/livetv/dvr/subscriptions"; // device present but no specific key
-}
-
-function toolError(err: unknown): { content: [{ type: "text"; text: string }]; isError: true } {
-  const msg =
-    err instanceof PlexApiError
-      ? `Plex API error ${err.status}: ${err.message.slice(0, 200)}`
-      : "Unexpected error contacting Plex";
-  return { content: [{ type: "text", text: msg }], isError: true };
+  if (device.key) {
+    const key = String(device.key);
+    if (key.startsWith("/") && !key.includes("..") && !key.includes("://")) {
+      return `${key}/subscriptions`;
+    }
+  }
+  return "/livetv/dvr/subscriptions"; // device present but key absent or unsafe
 }
 
 function formatTimestamp(epoch: number): string {
@@ -73,7 +71,7 @@ function formatSubscription(s: DvrSubscription): string {
     ? `\n  Starts: ${formatTimestamp(Number(s.startTime))}${s.endTime ? ` → ${formatTimestamp(Number(s.endTime))}` : ""}`
     : "";
   const status = s.status ? `\n  Status: ${s.status}` : "";
-  const padStart = s.startTimeOffset ? `\n  Pre-roll: ${s.startTimeOffset}s` : "";
+  const padStart = s.startTimeOffset ? `\n  Pre-roll: ${Math.abs(Number(s.startTimeOffset))}s` : "";
   const padEnd = s.endTimeOffset ? `\n  Post-roll: ${s.endTimeOffset}s` : "";
   return `[${id}] ${title}${type}${channel}${timeRange}${status}${padStart}${padEnd}`;
 }

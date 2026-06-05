@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type IPlexClient, PlexApiError } from "../plex-client.js";
+import { toolError } from "./shared.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -76,11 +77,11 @@ function formatTime(epochMs: number): string {
     "Nov",
     "Dec",
   ];
-  const h = d.getHours();
-  const m = d.getMinutes().toString().padStart(2, "0");
+  const h = d.getUTCHours();
+  const m = d.getUTCMinutes().toString().padStart(2, "0");
   const ampm = h >= 12 ? "PM" : "AM";
   const h12 = h % 12 || 12;
-  return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}, ${h12}:${m} ${ampm}`;
+  return `${days[d.getUTCDay()]} ${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${h12}:${m} ${ampm} UTC`;
 }
 
 function formatProgram(p: EpgProgram): string {
@@ -125,14 +126,6 @@ function formatProgram(p: EpgProgram): string {
     `${episodePrefix}${title}${year} [${type}]${rating}${contentRating}` +
     (details ? `\n${details}` : "")
   );
-}
-
-function toolError(err: unknown): { content: [{ type: "text"; text: string }]; isError: true } {
-  const msg =
-    err instanceof PlexApiError
-      ? `Plex API error ${err.status}: ${err.message.slice(0, 200)}`
-      : "Unexpected error contacting Plex";
-  return { content: [{ type: "text", text: msg }], isError: true };
 }
 
 const NOT_CONFIGURED =

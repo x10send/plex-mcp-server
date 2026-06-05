@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type IPlexClient, PlexApiError } from "../plex-client.js";
+import type { IPlexClient } from "../plex-client.js";
+import { toolError, NUMERIC_ID, RATING_KEY } from "./shared.js";
 
 interface MediaItem {
   ratingKey?: unknown;
@@ -37,14 +38,6 @@ function formatItem(m: MediaItem): string {
       ? `${m.parentTitle} › `
       : "";
   return `[${key}] ${prefix}${title}${year} [${type}]`;
-}
-
-function toolError(err: unknown): { content: [{ type: "text"; text: string }]; isError: true } {
-  const msg =
-    err instanceof PlexApiError
-      ? `Plex API error ${err.status}: ${err.message.slice(0, 200)}`
-      : "Unexpected error contacting Plex";
-  return { content: [{ type: "text", text: msg }], isError: true };
 }
 
 export function registerDiscoveryTools(server: McpServer, client: IPlexClient): void {
@@ -89,7 +82,7 @@ export function registerDiscoveryTools(server: McpServer, client: IPlexClient): 
     "get_genres",
     "List all genres present in a Plex library section. Use these values with get_library_contents genre filter.",
     {
-      section_id: z.string().describe("Library section ID (from get_libraries)"),
+      section_id: NUMERIC_ID.describe("Library section ID (from get_libraries)"),
     },
     async ({ section_id }) => {
       try {
@@ -115,7 +108,7 @@ export function registerDiscoveryTools(server: McpServer, client: IPlexClient): 
     "get_actors",
     "List actors present in a Plex library section for filtering or browsing by cast.",
     {
-      section_id: z.string().describe("Library section ID (from get_libraries)"),
+      section_id: NUMERIC_ID.describe("Library section ID (from get_libraries)"),
     },
     async ({ section_id }) => {
       try {
@@ -144,7 +137,7 @@ export function registerDiscoveryTools(server: McpServer, client: IPlexClient): 
     "get_directors",
     "List directors present in a Plex library section for filtering or browsing by director.",
     {
-      section_id: z.string().describe("Library section ID (from get_libraries)"),
+      section_id: NUMERIC_ID.describe("Library section ID (from get_libraries)"),
     },
     async ({ section_id }) => {
       try {
@@ -173,7 +166,7 @@ export function registerDiscoveryTools(server: McpServer, client: IPlexClient): 
     "get_collections",
     "List smart and manual collections in a Plex library section.",
     {
-      section_id: z.string().describe("Library section ID (from get_libraries)"),
+      section_id: NUMERIC_ID.describe("Library section ID (from get_libraries)"),
     },
     async ({ section_id }) => {
       try {
@@ -209,7 +202,7 @@ export function registerDiscoveryTools(server: McpServer, client: IPlexClient): 
     "get_collection_items",
     "List the media items inside a specific Plex collection.",
     {
-      collection_id: z.string().describe("Rating key of the collection (from get_collections)"),
+      collection_id: NUMERIC_ID.describe("Rating key of the collection (from get_collections)"),
     },
     async ({ collection_id }) => {
       try {
@@ -239,7 +232,7 @@ export function registerDiscoveryTools(server: McpServer, client: IPlexClient): 
     "get_related",
     "Get Plex's related content for a media item — 'More by this director', 'Similar movies', etc. Primary tool for mood-based chained recommendations.",
     {
-      rating_key: z.string().describe("Rating key of the media item"),
+      rating_key: RATING_KEY.describe("Rating key of the media item"),
     },
     async ({ rating_key }) => {
       try {
@@ -375,7 +368,8 @@ export function registerDiscoveryTools(server: McpServer, client: IPlexClient): 
           return { content: [{ type: "text", text: "No watch history found." }] };
         const lines = items.map((m) => {
           const when = m.viewedAt
-            ? new Date(Number(m.viewedAt) * 1000).toLocaleString()
+            ? new Date(Number(m.viewedAt) * 1000).toISOString().replace("T", " ").slice(0, 19) +
+              " UTC"
             : "unknown time";
           return `${formatItem(m)} — watched ${when}`;
         });
@@ -394,7 +388,7 @@ export function registerDiscoveryTools(server: McpServer, client: IPlexClient): 
     "get_random_items",
     "Get a random selection from a library section, with optional filters. Combine with genre/unwatched filters for discovery (e.g. random unwatched comedy).",
     {
-      section_id: z.string().describe("Library section ID (from get_libraries)"),
+      section_id: NUMERIC_ID.describe("Library section ID (from get_libraries)"),
       count: z
         .number()
         .int()

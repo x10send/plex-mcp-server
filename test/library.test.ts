@@ -586,6 +586,85 @@ describe("get_media_extras", () => {
   });
 });
 
+// Input validation
+describe("input validation", () => {
+  it("rejects non-numeric section_id in get_library_contents", async () => {
+    const client = makeMockClient();
+    const { isError } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "../secrets" },
+      client
+    );
+    assert.equal(isError, true);
+  });
+
+  it("rejects non-numeric rating_key in get_children", async () => {
+    const client = makeMockClient();
+    const { isError } = await callTool(
+      register,
+      "get_children",
+      { rating_key: "../../etc/passwd" },
+      client
+    );
+    assert.equal(isError, true);
+  });
+
+  it("rejects non-numeric rating_key in get_media_info", async () => {
+    const client = makeMockClient();
+    const { isError } = await callTool(register, "get_media_info", { rating_key: "abc" }, client);
+    assert.equal(isError, true);
+  });
+
+  it("shows client-filtered note for SD resolution in header", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 100,
+        Metadata: [
+          {
+            ratingKey: "5",
+            title: "Old Film",
+            type: "movie",
+            Media: [{ videoResolution: "sd", bitrate: 800 }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "sd" },
+      client
+    );
+    assert.match(text, /1 matching; library total: 100/);
+  });
+
+  it("shows client-filtered note for min_bitrate in header", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 50,
+        Metadata: [
+          {
+            ratingKey: "6",
+            title: "High Quality",
+            type: "movie",
+            Media: [{ videoResolution: "1080", bitrate: 20000 }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", min_bitrate: 15000 },
+      client
+    );
+    assert.match(text, /1 matching; library total: 50/);
+  });
+});
+
 // Branch coverage: formatting edge cases
 describe("formatting edge cases", () => {
   it("formats item with parentTitle only (album track without grandparent)", async () => {

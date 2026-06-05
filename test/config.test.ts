@@ -31,6 +31,15 @@ describe("validatePlexUrl", () => {
     await assert.doesNotReject(() => validatePlexUrl("http://169.254.1.1:32400"));
   });
 
+  it("accepts CGNAT 100.64.0.0/10 addresses (RFC 6598)", async () => {
+    await assert.doesNotReject(() => validatePlexUrl("http://100.64.0.1:32400"));
+    await assert.doesNotReject(() => validatePlexUrl("http://100.127.255.1:32400"));
+  });
+
+  it("rejects public addresses that start with 100 but outside CGNAT range", async () => {
+    await assert.rejects(() => validatePlexUrl("http://100.128.0.1:32400"), /SSRF/);
+  });
+
   it("rejects public IPv6 addresses", async () => {
     await assert.rejects(() => validatePlexUrl("http://[2001:db8::1]:32400"), /SSRF/);
   });

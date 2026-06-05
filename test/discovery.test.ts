@@ -356,6 +356,50 @@ describe("get_random_items", () => {
   });
 });
 
+// Input validation
+describe("discovery input validation", () => {
+  it("rejects non-numeric section_id in get_genres", async () => {
+    const client = makeMockClient();
+    const { isError } = await callTool(register, "get_genres", { section_id: "../admin" }, client);
+    assert.equal(isError, true);
+  });
+
+  it("rejects non-numeric collection_id in get_collection_items", async () => {
+    const client = makeMockClient();
+    const { isError } = await callTool(
+      register,
+      "get_collection_items",
+      { collection_id: "../../secrets" },
+      client
+    );
+    assert.equal(isError, true);
+  });
+
+  it("rejects non-numeric rating_key in get_related", async () => {
+    const client = makeMockClient();
+    const { isError } = await callTool(
+      register,
+      "get_related",
+      { rating_key: "abc/../def" },
+      client
+    );
+    assert.equal(isError, true);
+  });
+
+  it("formats watch history viewedAt as UTC ISO timestamp", async () => {
+    const client = makeMockClient();
+    client.setResponse("/status/sessions/history/all", {
+      MediaContainer: {
+        Metadata: [{ ratingKey: "10", title: "Inception", type: "movie", viewedAt: 1717200000 }],
+      },
+    });
+    const { text } = await callTool(register, "get_watch_history", {}, client);
+    // Should match ISO format with " UTC" suffix, not a locale string
+    assert.match(text, /2024-06-01 \d{2}:\d{2}:\d{2} UTC/);
+    assert.doesNotMatch(text, /AM|PM/);
+  });
+});
+
 // Branch coverage: formatting edge cases in discovery tools
 describe("discovery formatting edge cases", () => {
   it("get_on_deck: item without viewOffset shows no progress", async () => {

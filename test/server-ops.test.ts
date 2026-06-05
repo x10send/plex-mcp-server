@@ -112,6 +112,42 @@ describe("get_server_statistics", () => {
     assert.match(text, /last weeks/);
   });
 
+  it("sends timespan code 6 for hours", async () => {
+    const client = makeMockClient();
+    client.setResponse("/statistics/bandwidth", {
+      MediaContainer: { StatisticsBandwidth: [{ bytes: 1000, direction: 0 }] },
+    });
+    await callTool(register, "get_server_statistics", { timespan: "hours" }, client);
+    assert.equal(client.getLastGetParams()?.["timespan"], "6");
+  });
+
+  it("sends timespan code 4 for days (default)", async () => {
+    const client = makeMockClient();
+    client.setResponse("/statistics/bandwidth", {
+      MediaContainer: { StatisticsBandwidth: [{ bytes: 1000, direction: 0 }] },
+    });
+    await callTool(register, "get_server_statistics", {}, client);
+    assert.equal(client.getLastGetParams()?.["timespan"], "4");
+  });
+
+  it("sends timespan code 3 for weeks", async () => {
+    const client = makeMockClient();
+    client.setResponse("/statistics/bandwidth", {
+      MediaContainer: { StatisticsBandwidth: [{ bytes: 1000, direction: 0 }] },
+    });
+    await callTool(register, "get_server_statistics", { timespan: "weeks" }, client);
+    assert.equal(client.getLastGetParams()?.["timespan"], "3");
+  });
+
+  it("sends timespan code 2 for months", async () => {
+    const client = makeMockClient();
+    client.setResponse("/statistics/bandwidth", {
+      MediaContainer: { StatisticsBandwidth: [{ bytes: 1000, direction: 0 }] },
+    });
+    await callTool(register, "get_server_statistics", { timespan: "months" }, client);
+    assert.equal(client.getLastGetParams()?.["timespan"], "2");
+  });
+
   it("returns no-stats message when empty", async () => {
     const client = makeMockClient();
     client.setResponse("/statistics/bandwidth", {

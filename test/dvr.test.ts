@@ -75,7 +75,7 @@ describe("get_scheduled_recordings", () => {
       },
     });
     const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
-    assert.match(text, /Pre-roll: -30s/);
+    assert.match(text, /Pre-roll: 30s/);
     assert.match(text, /Post-roll: 60s/);
   });
 
@@ -313,6 +313,49 @@ describe("cancel_recording", () => {
     );
     assert.equal(isError, true);
     assert.match(text, /404/);
+  });
+});
+
+// ── device.key sanitization ───────────────────────────────────────────────────
+
+describe("device key sanitization", () => {
+  it("uses fallback path when device.key contains path traversal", async () => {
+    const client = makeMockClient();
+    client.setResponse("/livetv/dvr", {
+      MediaContainer: { DVRDevice: [{ key: "../../secrets" }] },
+    });
+    client.setResponse("/livetv/dvr/subscriptions", {
+      MediaContainer: { MediaSubscription: [] },
+    });
+    const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /No scheduled recordings/);
+  });
+
+  it("uses fallback path when device.key contains a protocol", async () => {
+    const client = makeMockClient();
+    client.setResponse("/livetv/dvr", {
+      MediaContainer: { DVRDevice: [{ key: "http://evil.example/path" }] },
+    });
+    client.setResponse("/livetv/dvr/subscriptions", {
+      MediaContainer: { MediaSubscription: [] },
+    });
+    const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /No scheduled recordings/);
+  });
+
+  it("accepts a valid device.key starting with /", async () => {
+    const client = makeMockClient();
+    client.setResponse("/livetv/dvr", {
+      MediaContainer: { DVRDevice: [{ key: "/livetv/dvr/42" }] },
+    });
+    client.setResponse("/livetv/dvr/42/subscriptions", {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /National Treasure/);
   });
 });
 

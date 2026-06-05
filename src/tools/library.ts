@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { type IPlexClient, PlexApiError } from "../plex-client.js";
+import type { IPlexClient } from "../plex-client.js";
+import { toolError, NUMERIC_ID, RATING_KEY } from "./shared.js";
 
 interface PlexMediaPart {
   size?: unknown;
@@ -174,14 +175,6 @@ function formatDetail(m: MediaItem): string {
   return lines.join("\n");
 }
 
-function toolError(err: unknown): { content: [{ type: "text"; text: string }]; isError: true } {
-  const msg =
-    err instanceof PlexApiError
-      ? `Plex API error ${err.status}: ${err.message.slice(0, 200)}`
-      : "Unexpected error contacting Plex";
-  return { content: [{ type: "text", text: msg }], isError: true };
-}
-
 export function registerLibraryTools(server: McpServer, client: IPlexClient): void {
   server.tool(
     "get_libraries",
@@ -211,7 +204,7 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
     "get_library_contents",
     "List media items in a Plex library section with inline quality details (resolution, bitrate, codec). Supports filtering by genre, year, contentRating, studio, unwatched status, resolution, and minimum bitrate.",
     {
-      section_id: z.string().describe("Library section ID (from get_libraries)"),
+      section_id: NUMERIC_ID.describe("Library section ID (from get_libraries)"),
       limit: z
         .number()
         .int()
@@ -298,11 +291,15 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
         if (items.length === 0)
           return { content: [{ type: "text", text: "No items found matching the criteria." }] };
         const lines = items.map(formatItem);
+        const isClientFiltered = resolution === "sd" || min_bitrate !== undefined;
+        const range = isClientFiltered
+          ? `${items.length} matching; library total: ${total}`
+          : `${offset}–${offset + items.length} of ${total}`;
         return {
           content: [
             {
               type: "text",
-              text: `Library contents (${offset}–${offset + items.length} of ${total}):\n${lines.join("\n")}`,
+              text: `Library contents (${range}):\n${lines.join("\n")}`,
             },
           ],
         };
@@ -316,7 +313,7 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
     "get_children",
     "Drill into a show's seasons, a season's episodes, or an album's tracks by rating key.",
     {
-      rating_key: z.string().describe("Rating key of the parent item (show, season, or album)"),
+      rating_key: RATING_KEY.describe("Rating key of the parent item (show, season, or album)"),
     },
     async ({ rating_key }) => {
       try {
@@ -346,7 +343,7 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
     "get_media_info",
     "Get full metadata for a single media item by its Plex rating key.",
     {
-      rating_key: z.string().describe("Plex rating key (item ID) of the media item"),
+      rating_key: RATING_KEY.describe("Plex rating key (item ID) of the media item"),
     },
     async ({ rating_key }) => {
       try {
@@ -369,7 +366,7 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
     "get_media_extras",
     "Get trailers, featurettes, interviews, and other extras attached to a media item.",
     {
-      rating_key: z.string().describe("Rating key of the media item"),
+      rating_key: RATING_KEY.describe("Rating key of the media item"),
     },
     async ({ rating_key }) => {
       try {
