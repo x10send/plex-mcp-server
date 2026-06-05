@@ -43,7 +43,7 @@ function makeProgram(overrides: Record<string, unknown> = {}): Record<string, un
         channelCallSign: "TNT",
         channelIdentifier: "ch-tnt",
         channelVcn: "3.1",
-        channelTitle: "TBS",
+        channelTitle: "3.1 TNT (TBS)",
         beginsAt: 1717200000,
         endsAt: 1717207200,
       },

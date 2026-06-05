@@ -309,13 +309,10 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
               if (resolvedAiringTime === undefined && media.beginsAt != null) {
                 resolvedAiringTime = String(media.beginsAt);
               }
-              const vcn = String(media.channelVcn ?? "");
-              const callSign = String(media.channelCallSign ?? "");
-              const title = String(media.channelTitle ?? "");
-              const display = [vcn, callSign, title && title !== callSign ? `(${title})` : ""]
-                .filter(Boolean)
-                .join(" ");
-              resolvedAiringChannels = `${args.channel_id}=${display}`;
+              // channelTitle is already the full display string ("44.1 KPHELD (Independent)").
+              // Constructing from vcn+callSign+title would double-wrap it.
+              const display = String(media.channelTitle ?? media.channelCallSign ?? "");
+              if (display) resolvedAiringChannels = `${args.channel_id}=${display}`;
             }
           } catch {
             // Continue without airing info.

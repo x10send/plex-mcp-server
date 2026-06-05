@@ -411,14 +411,9 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
 
         const body = channels
           .map((ch) => {
-            const firstMedia = ch.programs[0]?.Media?.[0];
-            const vcn = firstMedia?.channelVcn ? String(firstMedia.channelVcn) : "";
-            const callSign = firstMedia?.channelCallSign ? String(firstMedia.channelCallSign) : "";
-            const channelKey =
-              vcn && callSign
-                ? `${vcn} ${callSign}${ch.title && ch.title !== callSign ? ` (${ch.title})` : ""}`
-                : callSign || ch.title || ch.id;
-            const chHeader = `📺 ${ch.title} [channel_id: ${ch.id}] [channel_key: ${channelKey}]`;
+            // channel_key = channelTitle, which Plex already formats as the full display string
+            // (e.g. "44.1 KPHELD (Independent)"). Do not prepend vcn/callSign — that doubles it.
+            const chHeader = `📺 ${ch.title} [channel_id: ${ch.id}] [channel_key: ${ch.title}]`;
             const progLines = ch.programs.map((p) => formatProgram(p)).join("\n");
             return `${chHeader}\n${progLines}`;
           })

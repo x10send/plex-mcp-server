@@ -466,9 +466,7 @@ describe("schedule_recording", () => {
             Media: [
               {
                 channelIdentifier: "ch-tnt",
-                channelVcn: "44.1",
-                channelCallSign: "KPHELD",
-                channelTitle: "Independent",
+                channelTitle: "44.1 KPHELD (Independent)",
                 beginsAt: 1717200000,
               },
             ],
