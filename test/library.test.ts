@@ -243,6 +243,130 @@ describe("get_library_contents", () => {
     assert.doesNotMatch(text, /HD Show/);
   });
 
+  it("1080p filter matches Plex value '1080p' (with p suffix)", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 2,
+        Metadata: [
+          {
+            ratingKey: "80",
+            title: "HD With P",
+            type: "movie",
+            Media: [{ videoResolution: "1080p", bitrate: 8000 }],
+          },
+          {
+            ratingKey: "81",
+            title: "SD Film",
+            type: "movie",
+            Media: [{ videoResolution: "sd", bitrate: 1000 }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "1080p" },
+      client
+    );
+    assert.match(text, /HD With P/);
+    assert.doesNotMatch(text, /SD Film/);
+  });
+
+  it("720p filter matches Plex value '720p' (with p suffix)", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 2,
+        Metadata: [
+          {
+            ratingKey: "82",
+            title: "720p Film",
+            type: "movie",
+            Media: [{ videoResolution: "720p", bitrate: 4000 }],
+          },
+          {
+            ratingKey: "83",
+            title: "1080p Film",
+            type: "movie",
+            Media: [{ videoResolution: "1080p", bitrate: 8000 }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "720p" },
+      client
+    );
+    assert.match(text, /720p Film/);
+    assert.doesNotMatch(text, /1080p Film/);
+  });
+
+  it("sd filter excludes '2160' (4K content stored as numeric resolution)", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 3,
+        Metadata: [
+          {
+            ratingKey: "84",
+            title: "SD Classic",
+            type: "movie",
+            Media: [{ videoResolution: "480", bitrate: 1200 }],
+          },
+          {
+            ratingKey: "85",
+            title: "UHD Film",
+            type: "movie",
+            Media: [{ videoResolution: "2160", bitrate: 40000 }],
+          },
+          {
+            ratingKey: "86",
+            title: "UHD With P",
+            type: "movie",
+            Media: [{ videoResolution: "2160p", bitrate: 40000 }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "sd" },
+      client
+    );
+    assert.match(text, /SD Classic/);
+    assert.doesNotMatch(text, /UHD Film/);
+    assert.doesNotMatch(text, /UHD With P/);
+  });
+
+  it("result count uses 'matching filter; N total in library' format when filter active", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 995,
+        Metadata: [
+          {
+            ratingKey: "87",
+            title: "HD Movie",
+            type: "movie",
+            Media: [{ videoResolution: "1080", bitrate: 8000 }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "1080p" },
+      client
+    );
+    assert.match(text, /1 matching filter; 995 total in library/);
+  });
+
   it("filters by min_bitrate", async () => {
     const client = makeMockClient();
     client.setResponse("/library/sections/1/all", {
@@ -783,7 +907,7 @@ describe("input validation", () => {
       { section_id: "1", resolution: "sd" },
       client
     );
-    assert.match(text, /1 matching; library total: 100/);
+    assert.match(text, /1 matching filter; 100 total in library/);
   });
 
   it("shows client-filtered note for min_bitrate in header", async () => {
@@ -807,7 +931,7 @@ describe("input validation", () => {
       { section_id: "1", min_bitrate: 15000 },
       client
     );
-    assert.match(text, /1 matching; library total: 50/);
+    assert.match(text, /1 matching filter; 50 total in library/);
   });
 });
 

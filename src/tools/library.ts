@@ -115,7 +115,9 @@ function parseRelativeDate(val: string): number | undefined {
 }
 
 function matchesResolutionFilter(videoResolution: unknown, filter: string): boolean {
-  const r = String(videoResolution ?? "").toLowerCase();
+  const r = String(videoResolution ?? "")
+    .toLowerCase()
+    .replace(/p$/, "");
   switch (filter) {
     case "4k":
       return r === "4k" || r === "2160";
@@ -124,7 +126,7 @@ function matchesResolutionFilter(videoResolution: unknown, filter: string): bool
     case "720p":
       return r === "720";
     case "sd":
-      return r !== "4k" && r !== "1080" && r !== "720";
+      return r !== "4k" && r !== "2160" && r !== "1080" && r !== "720";
     default:
       return true;
   }
@@ -329,7 +331,7 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
         const lines = items.map(formatItem);
         const isClientFiltered = resolution !== undefined || min_bitrate !== undefined;
         const range = isClientFiltered
-          ? `${items.length} matching; library total: ${total}`
+          ? `${items.length} matching filter; ${total} total in library`
           : `${offset}–${offset + items.length} of ${total}`;
         return {
           content: [

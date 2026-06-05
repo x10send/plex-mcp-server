@@ -366,6 +366,67 @@ describe("schedule_recording", () => {
     assert.equal(params?.["targetLibrarySectionID"], undefined);
   });
 
+  it("includes deviceID in POST params when /livetv/dvrs returns a device", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse("/livetv/dvrs", {
+      MediaContainer: { Device: [{ deviceid: "AABBCCDDEEFF" }] },
+    });
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(register, "schedule_recording", { program_id: "1001" }, client);
+    const params = client.getLastPostParams();
+    assert.equal(params?.["deviceID"], "AABBCCDDEEFF");
+  });
+
+  it("omits deviceID when /livetv/dvrs fetch fails", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    // No /livetv/dvrs mock → throws silently
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(register, "schedule_recording", { program_id: "1001" }, client);
+    const params = client.getLastPostParams();
+    assert.equal(params?.["deviceID"], undefined);
+  });
+
+  it("debug=true shows POST params in output on success", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", debug: true },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /DEBUG/);
+    assert.match(text, /hints\[ratingKey\]/);
+    assert.match(text, /Recording scheduled/);
+  });
+
+  it("debug=true shows params and error details on POST failure", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setError(SUBS_PATH, 400, "Bad Request: invalid program");
+    const { text, isError } = await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", debug: true },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /DEBUG/);
+    assert.match(text, /POST failed: HTTP 400/);
+    assert.match(text, /Bad Request/);
+    assert.match(text, /hints\[ratingKey\]/);
+  });
+
   it("uses episode content type (4) for program_type=episode", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);

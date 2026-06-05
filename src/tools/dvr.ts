@@ -39,6 +39,14 @@ interface TemplateResponse {
   };
 }
 
+interface DvrDevice {
+  deviceid?: unknown;
+}
+
+interface DvrDevicesResponse {
+  MediaContainer: { Device?: DvrDevice[] };
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const SUBSCRIPTIONS_PATH = "/media/subscriptions";
@@ -167,6 +175,12 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         .describe(
           "Keep recording this many seconds past the end time (0–3600, rounded up to minutes). Default 5 minutes."
         ),
+      debug: z
+        .boolean()
+        .optional()
+        .describe(
+          "Show all POST params and the full Plex error response. Use this to diagnose 400 errors."
+        ),
     },
     async (args) => {
       try {
@@ -238,11 +252,50 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (sectionId !== undefined) params["targetLibrarySectionID"] = String(sectionId);
         if (args.channel_id) params["params[airingChannels]"] = args.channel_id;
 
-        // 7. POST the subscription.
+        // 7. Fetch deviceID from /livetv/dvrs and include if found.
+        let deviceId: string | undefined;
+        try {
+          const dvrs = await client.get<DvrDevicesResponse>("/livetv/dvrs");
+          const device = dvrs.MediaContainer?.Device?.[0];
+          if (device?.deviceid != null) {
+            deviceId = String(device.deviceid);
+            params["deviceID"] = deviceId;
+          }
+        } catch {
+          // Continue without deviceID.
+        }
+
+        // 8. Collect debug info if requested.
+        const debugLines: string[] = [];
+        if (args.debug) {
+          debugLines.push("=== DEBUG: schedule_recording ===");
+          debugLines.push(`providerId: ${providerId}`);
+          debugLines.push(`sectionId: ${sectionId ?? "not found"}`);
+          debugLines.push(`deviceId: ${deviceId ?? "not found"}`);
+          debugLines.push("POST params:");
+          for (const [k, v] of Object.entries(params)) {
+            debugLines.push(`  ${k} = ${v}`);
+          }
+          debugLines.push("=================================");
+        }
+
+        // 9. POST the subscription.
         let data: SubscriptionsResponse;
         try {
           data = await client.post<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
         } catch (err) {
+          if (args.debug && err instanceof PlexApiError) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    debugLines.join("\n") +
+                    `\n\nPOST failed: HTTP ${err.status}\nError: ${err.message}`,
+                },
+              ],
+            };
+          }
           if (err instanceof PlexApiError && err.status === 404) {
             return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
           }
@@ -252,11 +305,12 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         const subs = normaliseSubscriptions(data.MediaContainer?.MediaSubscription);
         const sub = subs[0];
         if (!sub) {
+          const noSubMsg = "Recording scheduled but Plex returned no subscription details.";
           return {
             content: [
               {
                 type: "text",
-                text: "Recording scheduled but Plex returned no subscription details.",
+                text: args.debug ? debugLines.join("\n") + "\n\n" + noSubMsg : noSubMsg,
               },
             ],
           };
@@ -269,7 +323,15 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (sub.channelTitle) lines.push(`Channel: ${sub.channelTitle}`);
         if (sub.startTime) lines.push(`Starts: ${formatTimestamp(Number(sub.startTime))}`);
         if (sub.endTime) lines.push(`Ends: ${formatTimestamp(Number(sub.endTime))}`);
-        return { content: [{ type: "text", text: lines.join("\n") }] };
+        const body = lines.join("\n");
+        return {
+          content: [
+            {
+              type: "text",
+              text: args.debug ? debugLines.join("\n") + "\n\n" + body : body,
+            },
+          ],
+        };
       } catch (err) {
         return toolError(err);
       }
