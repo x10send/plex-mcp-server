@@ -119,6 +119,52 @@ describe("get_live_tv_guide", () => {
     assert.equal(isError, true);
   });
 
+  it("returns diagnostic message when guide path returns 404", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
+    client.setError("/media/providers/tv.plex.provider.epg/items", 404, "Not found");
+    const { isError, text } = await callTool(register, "get_live_tv_guide", {}, client);
+    assert.equal(isError, true);
+    assert.match(text, /404/);
+    assert.match(text, /tv\.plex\.provider\.epg/);
+    assert.match(text, /media\/providers/);
+  });
+
+  it("uses provider identifier in fallback path when no Feature key", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", {
+      MediaContainer: {
+        MediaProvider: [{ identifier: "tv.plex.provider.epg.ota" }],
+      },
+    });
+    client.setResponse("/media/providers/tv.plex.provider.epg.ota/items", {
+      MediaContainer: { Metadata: [makeProgram()] },
+    });
+    const { text, isError } = await callTool(register, "get_live_tv_guide", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /National Treasure/);
+  });
+
+  it("matches feature with type content", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", {
+      MediaContainer: {
+        MediaProvider: [
+          {
+            identifier: "tv.plex.provider.epg",
+            Feature: [{ key: "/media/providers/tv.plex.provider.epg/items", type: "content" }],
+          },
+        ],
+      },
+    });
+    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+      MediaContainer: { Metadata: [makeProgram()] },
+    });
+    const { text, isError } = await callTool(register, "get_live_tv_guide", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /National Treasure/);
+  });
+
   it("formats episode with show/season/episode prefix", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);

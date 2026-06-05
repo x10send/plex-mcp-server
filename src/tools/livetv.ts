@@ -199,19 +199,25 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
           return { content: [{ type: "text", text: NOT_CONFIGURED }] };
         }
 
-        // Prefer the guide feature's declared path; fall back to well-known default
+        // Prefer the guide feature's declared path; fall back to provider-derived path.
+        // Plex uses type "guide" or "content" for the EPG items feature.
         const guideFeature = (epgProvider.Feature ?? []).find(
           (f) =>
             String(f.type ?? "")
               .toLowerCase()
               .includes("guide") ||
+            String(f.type ?? "").toLowerCase() === "content" ||
             String(f.key ?? "")
               .toLowerCase()
-              .includes("items")
+              .includes("items") ||
+            String(f.key ?? "")
+              .toLowerCase()
+              .includes("guide")
         );
+        const providerId = String(epgProvider.identifier ?? "tv.plex.provider.epg");
         const guidePath = guideFeature?.key
           ? String(guideFeature.key)
-          : "/media/providers/tv.plex.provider.epg/items";
+          : `/media/providers/${providerId}/items`;
 
         // Plex type codes: 1 = movie, 4 = episode
         const params: Record<string, string> = {
@@ -222,7 +228,28 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
         if (args.type === "movie") params.type = "1";
         else if (args.type === "episode") params.type = "4";
 
-        const guide = await client.get<GuideResponse>(guidePath, params);
+        let guide: GuideResponse;
+        try {
+          guide = await client.get<GuideResponse>(guidePath, params);
+        } catch (guideErr) {
+          if (guideErr instanceof PlexApiError && guideErr.status === 404) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `Live TV guide returned 404 on path "${guidePath}". ` +
+                    `EPG provider: ${providerId}. ` +
+                    `Feature key used: ${guideFeature?.key ?? "none (used fallback)"}. ` +
+                    `Run: curl -s -H "X-Plex-Token: YOUR_TOKEN" ` +
+                    `http://YOUR_PLEX_URL/media/providers to inspect available guide paths.`,
+                },
+              ],
+              isError: true,
+            };
+          }
+          return toolError(guideErr);
+        }
         let programs = guide.MediaContainer?.Metadata ?? [];
 
         // Client-side filters (Plex may not support all server-side)
