@@ -456,6 +456,44 @@ describe("get_library_contents", () => {
     assert.match(text, /No items found/);
   });
 
+  it("fetches all items (container size 10000) when resolution filter is active", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 0, Metadata: [] },
+    });
+    await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "1080p" },
+      client
+    );
+    assert.equal(client.getLastGetParams()?.["X-Plex-Container-Size"], "10000");
+    assert.equal(client.getLastGetParams()?.["X-Plex-Container-Start"], "0");
+  });
+
+  it("fetches all items (container size 10000) when min_bitrate filter is active", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 0, Metadata: [] },
+    });
+    await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", min_bitrate: 10000 },
+      client
+    );
+    assert.equal(client.getLastGetParams()?.["X-Plex-Container-Size"], "10000");
+  });
+
+  it("respects limit param when no client-side filter is active", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 100, Metadata: [] },
+    });
+    await callTool(register, "get_library_contents", { section_id: "1", limit: 25 }, client);
+    assert.equal(client.getLastGetParams()?.["X-Plex-Container-Size"], "25");
+  });
+
   it("does not pass videoResolution param for resolution=1080p (client-side only)", async () => {
     const client = makeMockClient();
     client.setResponse("/library/sections/1/all", {

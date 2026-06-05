@@ -288,9 +288,12 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
       added_before,
     }) => {
       try {
+        // Client-side filters (resolution, min_bitrate) must scan the whole library —
+        // a paginated fetch would miss items outside the current page.
+        const isClientFiltered = resolution !== undefined || min_bitrate !== undefined;
         const params: Record<string, string> = {
-          "X-Plex-Container-Size": String(limit),
-          "X-Plex-Container-Start": String(offset),
+          "X-Plex-Container-Size": isClientFiltered ? "10000" : String(limit),
+          "X-Plex-Container-Start": isClientFiltered ? "0" : String(offset),
         };
         if (genre) params["genre"] = genre;
         if (unwatched) params["unwatched"] = "1";
@@ -329,7 +332,6 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
         if (items.length === 0)
           return { content: [{ type: "text", text: "No items found matching the criteria." }] };
         const lines = items.map(formatItem);
-        const isClientFiltered = resolution !== undefined || min_bitrate !== undefined;
         const range = isClientFiltered
           ? `${items.length} matching filter; ${total} total in library`
           : `${offset}–${offset + items.length} of ${total}`;
