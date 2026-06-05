@@ -6,9 +6,9 @@ import { type IPlexClient, PlexApiError } from "../plex-client.js";
 
 interface EpgMedia {
   channelCallSign?: unknown;
-  channelID?: unknown;
-  channelKey?: unknown;
-  startsAt?: unknown; // unix seconds
+  channelIdentifier?: unknown;
+  channelVcn?: unknown;
+  beginsAt?: unknown; // unix seconds
   endsAt?: unknown; // unix seconds
 }
 
@@ -103,14 +103,14 @@ function formatProgram(p: EpgProgram): string {
     .join(", ");
 
   const media = p.Media?.[0];
-  const startsMs = media?.startsAt !== undefined ? Number(media.startsAt) * 1000 : undefined;
+  const startsMs = media?.beginsAt !== undefined ? Number(media.beginsAt) * 1000 : undefined;
   const endsMs = media?.endsAt !== undefined ? Number(media.endsAt) * 1000 : undefined;
   // Prefer the full key path (what Plex needs as programKey for DVR scheduling)
   const programId = p.key ?? p.ratingKey;
 
   const details = [
     media?.channelCallSign ? `  Channel: ${media.channelCallSign}` : "",
-    media?.channelKey ? `  Channel ID: ${String(media.channelKey)}` : "",
+    media?.channelIdentifier ? `  Channel ID: ${String(media.channelIdentifier)}` : "",
     startsMs !== undefined
       ? `  Airs: ${formatTime(startsMs)}${endsMs !== undefined ? ` → ${formatTime(endsMs)}` : ""}`
       : "",
@@ -214,10 +214,12 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
           return { content: [{ type: "text", text: NOT_CONFIGURED }] };
         }
 
-        // Plex type codes: 1 = movie, 4 = episode
+        // Plex EPG grid uses comparison-operator params: beginsAt> and endsAt<
+        // (URL-encoded as beginsAt%3E and endsAt%3C on the wire).
+        // gridStart/gridEnd are silently ignored and return empty results.
         const params: Record<string, string> = {
-          gridStart: Math.floor(startMs / 1000).toString(),
-          gridEnd: Math.floor(endMs / 1000).toString(),
+          "beginsAt>": Math.floor(startMs / 1000).toString(),
+          "endsAt<": Math.floor(endMs / 1000).toString(),
         };
         if (args.channel_id) params.channelKey = args.channel_id;
         if (args.type === "movie") params.type = "1";
@@ -251,7 +253,7 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
         }
 
         for (const epgProvider of epgProviders) {
-          // Plex cloud EPG uses type "grid" with gridStart/gridEnd params.
+          // Plex cloud EPG uses type "grid" with beginsAt>/endsAt< params.
           // Older/local EPG may use type "guide". "content" and "items" features
           // lead to section-list endpoints, not guide data — skip them.
           const guideFeature = (epgProvider.Feature ?? []).find(
@@ -354,8 +356,8 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
 
         // Sort by air time
         programs.sort((a, b) => {
-          const aTime = Number(a.Media?.[0]?.startsAt ?? 0);
-          const bTime = Number(b.Media?.[0]?.startsAt ?? 0);
+          const aTime = Number(a.Media?.[0]?.beginsAt ?? 0);
+          const bTime = Number(b.Media?.[0]?.beginsAt ?? 0);
           return aTime - bTime;
         });
 

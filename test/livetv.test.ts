@@ -41,9 +41,8 @@ function makeProgram(overrides: Record<string, unknown> = {}): Record<string, un
     Media: [
       {
         channelCallSign: "TNT",
-        channelID: "ch-tnt",
-        channelKey: "/livetv/channels/ch-tnt",
-        startsAt: 1717200000,
+        channelIdentifier: "ch-tnt",
+        beginsAt: 1717200000,
         endsAt: 1717207200,
       },
     ],
@@ -66,8 +65,8 @@ function makeEpisode(overrides: Record<string, unknown> = {}): Record<string, un
     Media: [
       {
         channelCallSign: "AMC",
-        channelKey: "/livetv/channels/ch-amc",
-        startsAt: 1717210000,
+        channelIdentifier: "ch-amc",
+        beginsAt: 1717210000,
         endsAt: 1717213600,
       },
     ],
@@ -255,11 +254,10 @@ describe("get_live_tv_guide", () => {
       title: "Later Movie",
       Media: [
         {
-          startsAt: 1717210000,
+          beginsAt: 1717210000,
           endsAt: 1717217200,
           channelCallSign: "TNT",
-          channelKey: "/livetv/channels/ch-tnt",
-          channelID: "ch-tnt",
+          channelIdentifier: "ch-tnt",
         },
       ],
     });
@@ -268,11 +266,10 @@ describe("get_live_tv_guide", () => {
       title: "Earlier Movie",
       Media: [
         {
-          startsAt: 1717200000,
+          beginsAt: 1717200000,
           endsAt: 1717207200,
           channelCallSign: "AMC",
-          channelKey: "/livetv/channels/ch-amc",
-          channelID: "ch-amc",
+          channelIdentifier: "ch-amc",
         },
       ],
     });
