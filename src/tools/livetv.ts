@@ -283,7 +283,11 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
             content: [
               {
                 type: "text",
-                text: "No programs found matching your criteria in the requested time window.",
+                text:
+                  "No programs found matching your criteria in the requested time window.\n" +
+                  `Searched: ${formatTime(startMs)} → ${formatTime(endMs)}\n` +
+                  `Guide path: ${guidePath}\n` +
+                  "If the guide appears empty, try refreshing EPG data in Plex (Settings → Live TV & DVR → Refresh Guide Data).",
               },
             ],
           };
