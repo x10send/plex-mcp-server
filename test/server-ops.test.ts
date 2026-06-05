@@ -368,6 +368,29 @@ describe("get_activities", () => {
     assert.match(text, /DVR Record/);
   });
 
+  it("classifies media.generate type as metadata", async () => {
+    const client = makeMockClient();
+    client.setResponse("/activities", {
+      MediaContainer: {
+        Activity: [{ type: "media.generate", title: "Generating thumbnails", progress: 30 }],
+      },
+    });
+    const { text } = await callTool(register, "get_activities", { type: "metadata" }, client);
+    assert.match(text, /Metadata Refresh \(1\)/);
+    assert.match(text, /Generating thumbnails/);
+  });
+
+  it("classifies media.analyze type as metadata", async () => {
+    const client = makeMockClient();
+    client.setResponse("/activities", {
+      MediaContainer: {
+        Activity: [{ type: "media.analyze", title: "Analyzing audio", progress: 60 }],
+      },
+    });
+    const { text } = await callTool(register, "get_activities", { type: "metadata" }, client);
+    assert.match(text, /Metadata Refresh \(1\)/);
+  });
+
   it("handles activity with no subtitle or progress", async () => {
     const client = makeMockClient();
     client.setResponse("/activities", {

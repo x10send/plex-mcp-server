@@ -78,7 +78,13 @@ function classifyActivity(a: Activity): string {
     return "subtitle";
   if (type.includes("library") || title.includes("scan") || title.includes("scanning"))
     return "scan";
-  if (type.includes("metadata") || title.includes("metadata")) return "metadata";
+  if (
+    type.includes("metadata") ||
+    type.includes("media.generate") ||
+    type.includes("media.analyze") ||
+    title.includes("metadata")
+  )
+    return "metadata";
   if (type.includes("download") || title.includes("download")) return "download";
   return "other";
 }
