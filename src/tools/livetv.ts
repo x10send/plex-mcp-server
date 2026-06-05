@@ -100,7 +100,7 @@ function formatProgram(p: EpgProgram): string {
     .join(", ");
 
   const media = p.Media?.[0];
-  const channel = media?.channelCallSign ? `  Channel: ${media.channelCallSign}` : "";
+  const channel = media?.channelCallSign ? `\n  Channel: ${media.channelCallSign}` : "";
   const channelKey = media?.channelKey ? `\n  Channel ID: ${String(media.channelKey)}` : "";
   const startsMs = media?.startsAt !== undefined ? Number(media.startsAt) * 1000 : undefined;
   const endsMs = media?.endsAt !== undefined ? Number(media.endsAt) * 1000 : undefined;

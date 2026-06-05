@@ -44,12 +44,13 @@ function formatSubscription(s: DvrSubscription): string {
   const title = String(s.title ?? "Unknown");
   const type = s.type ? ` [${s.type}]` : "";
   const channel = s.channelTitle ? `\n  Channel: ${s.channelTitle}` : "";
-  const start = s.startTime ? `\n  Starts: ${formatTimestamp(Number(s.startTime))}` : "";
-  const end = s.endTime ? ` → ${formatTimestamp(Number(s.endTime))}` : "";
+  const timeRange = s.startTime
+    ? `\n  Starts: ${formatTimestamp(Number(s.startTime))}${s.endTime ? ` → ${formatTimestamp(Number(s.endTime))}` : ""}`
+    : "";
   const status = s.status ? `\n  Status: ${s.status}` : "";
   const padStart = s.startTimeOffset ? `\n  Pre-roll: ${s.startTimeOffset}s` : "";
   const padEnd = s.endTimeOffset ? `\n  Post-roll: ${s.endTimeOffset}s` : "";
-  return `[${id}] ${title}${type}${channel}${start}${end}${status}${padStart}${padEnd}`;
+  return `[${id}] ${title}${type}${channel}${timeRange}${status}${padStart}${padEnd}`;
 }
 
 // ── Tool registration ────────────────────────────────────────────────────────

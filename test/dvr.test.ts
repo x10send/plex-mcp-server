@@ -68,6 +68,18 @@ describe("get_scheduled_recordings", () => {
     assert.match(text, /Post-roll: 60s/);
   });
 
+  it("endTime without startTime does not produce orphaned arrow", async () => {
+    const client = makeMockClient();
+    client.setResponse("/dvr/subscriptions", {
+      MediaContainer: {
+        MediaSubscription: [{ id: "7", title: "Oddity", endTime: 1717207200 }],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.doesNotMatch(text, /→/);
+    assert.doesNotMatch(text, /Starts:/);
+  });
+
   it("returns error on API failure", async () => {
     const client = makeMockClient();
     client.setError("/dvr/subscriptions", 503, "DVR unavailable");
