@@ -519,7 +519,7 @@ describe("schedule_recording", () => {
     assert.equal(params?.["prefs[oneShot]"], "false");
   });
 
-  it("uses episode content type (4) for program_type=episode", async () => {
+  it("uses type=2 for program_type=episode — matches confirmed-working HAR", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
@@ -532,9 +532,10 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["type"], "1");
-    assert.equal(params?.["hints[type]"], "1");
-    assert.equal(params?.["params[libraryType]"], "1");
+    assert.equal(params?.["type"], "2");
+    assert.equal(params?.["hints[type]"], "2");
+    assert.equal(params?.["params[libraryType]"], "2");
+    assert.equal(params?.["prefs[oneShot]"], "true");
   });
 });
 

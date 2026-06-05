@@ -39,6 +39,11 @@ interface EpgAiring {
 interface GuideProgram {
   ratingKey?: unknown;
   key?: unknown;
+  title?: unknown;
+  grandparentTitle?: unknown;
+  year?: unknown;
+  thumb?: unknown;
+  grandparentThumb?: unknown;
   Media?: EpgAiring[];
 }
 
@@ -283,6 +288,10 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         let resolvedAiringTime =
           args.airing_time !== undefined ? String(args.airing_time) : undefined;
         let resolvedAiringChannels: string | undefined;
+        // hint fields — seeded from caller args, filled in by guide lookup below
+        let hintTitle: string | undefined = args.program_title;
+        let hintYear: string | undefined;
+        let hintThumb: string | undefined;
         if (args.channel_key && args.channel_id) {
           resolvedAiringChannels = `${args.channel_id}=${args.channel_key}`;
         } else if (args.channel_id) {
@@ -304,26 +313,36 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
                   String(p.ratingKey ?? "") === args.program_id ||
                   String(p.ratingKey ?? "") === programGuid
               ) ?? channelPrograms[0];
-            if (matched?.Media?.[0]) {
-              const media = matched.Media[0];
-              if (resolvedAiringTime === undefined && media.beginsAt != null) {
-                resolvedAiringTime = String(media.beginsAt);
+            if (matched) {
+              if (!hintTitle) {
+                const gTitle = matched.grandparentTitle
+                  ? String(matched.grandparentTitle)
+                  : undefined;
+                hintTitle = gTitle ?? (matched.title ? String(matched.title) : undefined);
               }
-              // channelTitle is already the full display string ("44.1 KPHELD (Independent)").
-              // Constructing from vcn+callSign+title would double-wrap it.
-              const display = String(media.channelTitle ?? media.channelCallSign ?? "");
-              if (display) resolvedAiringChannels = `${args.channel_id}=${display}`;
+              if (matched.year != null) hintYear = String(matched.year);
+              const rawThumb = matched.grandparentThumb ?? matched.thumb;
+              if (rawThumb != null) hintThumb = String(rawThumb);
+              if (matched.Media?.[0]) {
+                const media = matched.Media[0];
+                if (resolvedAiringTime === undefined && media.beginsAt != null) {
+                  resolvedAiringTime = String(media.beginsAt);
+                }
+                // channelTitle is already the full display string ("44.1 KPHELD (Independent)").
+                // Constructing from vcn+callSign+title would double-wrap it.
+                const display = String(media.channelTitle ?? media.channelCallSign ?? "");
+                if (display) resolvedAiringChannels = `${args.channel_id}=${display}`;
+              }
             }
           } catch {
             // Continue without airing info.
           }
         }
 
-        // 4. Map subscription type: 2=season pass (show), 1=one-shot (movie or episode).
-        //    The subscriptions API uses 1/2 only — Plex media type 4 (episode) is NOT used here.
-        //    libraryType mirrors subscription type, not Plex library section type.
-        const contentType = args.program_type === "show" ? "2" : "1";
-        const libraryType = args.program_type === "show" ? "2" : "1";
+        // 4. Use type=2 for all subscriptions — matches confirmed-working HAR.
+        //    One-shot vs season pass is differentiated by prefs[oneShot], not type.
+        const contentType = "2";
+        const libraryType = "2";
         const oneShot = args.program_type === "show" ? "false" : "true";
 
         // 5. Convert second-based offsets to minutes (Plex API uses minutes).
@@ -377,7 +396,9 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           "hints[ratingKey]": programGuid,
           "hints[guid]": programGuid,
         };
-        if (args.program_title) params["hints[title]"] = args.program_title;
+        if (hintTitle) params["hints[title]"] = hintTitle;
+        if (hintYear) params["hints[year]"] = hintYear;
+        if (hintThumb) params["hints[thumb]"] = hintThumb;
         if (resolvedAiringChannels) params["params[airingChannels]"] = resolvedAiringChannels;
         if (resolvedAiringTime !== undefined) params["params[airingTimes]"] = resolvedAiringTime;
         if (sectionId !== undefined) {
