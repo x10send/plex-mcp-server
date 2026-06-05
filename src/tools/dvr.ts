@@ -25,6 +25,25 @@ interface SubscriptionsResponse {
 interface EpgProvider {
   identifier?: unknown;
   id?: unknown;
+  Feature?: Array<{ key?: unknown; type?: unknown }>;
+}
+
+interface EpgAiring {
+  channelIdentifier?: unknown;
+  channelVcn?: unknown;
+  channelCallSign?: unknown;
+  channelTitle?: unknown;
+  beginsAt?: unknown;
+}
+
+interface GuideProgram {
+  ratingKey?: unknown;
+  key?: unknown;
+  Media?: EpgAiring[];
+}
+
+interface GuideResponse {
+  MediaContainer: { Metadata?: GuideProgram[] };
 }
 
 interface DvrProvidersResponse {
@@ -208,8 +227,9 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
     },
     async (args) => {
       try {
-        // 1. Fetch EPG provider numeric ID from /media/providers.
+        // 1. Fetch EPG provider info from /media/providers.
         let providerId: number;
+        let guidePath: string;
         try {
           const providers = await client.get<DvrProvidersResponse>("/media/providers");
           const epgProvider = (providers.MediaContainer?.MediaProvider ?? []).find((p) =>
@@ -219,6 +239,15 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
             return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
           }
           providerId = Number(epgProvider.id);
+          const epgIdentifier = String(epgProvider.identifier ?? "tv.plex.providers.epg.cloud");
+          const guideFeature = (Array.isArray(epgProvider.Feature) ? epgProvider.Feature : []).find(
+            (f) =>
+              String(f.type ?? "").toLowerCase() === "grid" ||
+              String(f.key ?? "")
+                .toLowerCase()
+                .includes("grid")
+          );
+          guidePath = guideFeature?.key ? String(guideFeature.key) : `/${epgIdentifier}/grid`;
         } catch (err) {
           if (err instanceof PlexApiError && err.status === 404) {
             return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
@@ -245,6 +274,52 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           }
         } catch {
           // Continue without section ID.
+        }
+
+        // 3.5. Guide lookup — fetch airing time and channel display string using channel_id.
+        //      params[airingChannels] format: {channelId}={vcn} {callSign} ({title})
+        //      params[airingTimes]: beginsAt unix seconds for the matched airing.
+        //      Silently skipped on failure — the POST may still succeed without them.
+        let resolvedAiringTime =
+          args.airing_time !== undefined ? String(args.airing_time) : undefined;
+        let resolvedAiringChannels: string | undefined;
+        if (args.channel_key && args.channel_id) {
+          resolvedAiringChannels = `${args.channel_id}=${args.channel_key}`;
+        } else if (args.channel_id) {
+          try {
+            const nowSec = Math.floor(Date.now() / 1000);
+            const guide = await client.get<GuideResponse>(guidePath, {
+              "beginsAt<": String(nowSec + 7 * 24 * 3600),
+              "endsAt>": String(nowSec),
+            });
+            const programs = Array.isArray(guide.MediaContainer?.Metadata)
+              ? guide.MediaContainer.Metadata
+              : [];
+            const channelPrograms = programs.filter(
+              (p) => String(p.Media?.[0]?.channelIdentifier ?? "") === args.channel_id
+            );
+            const matched =
+              channelPrograms.find(
+                (p) =>
+                  String(p.ratingKey ?? "") === args.program_id ||
+                  String(p.ratingKey ?? "") === programGuid
+              ) ?? channelPrograms[0];
+            if (matched?.Media?.[0]) {
+              const media = matched.Media[0];
+              if (resolvedAiringTime === undefined && media.beginsAt != null) {
+                resolvedAiringTime = String(media.beginsAt);
+              }
+              const vcn = String(media.channelVcn ?? "");
+              const callSign = String(media.channelCallSign ?? "");
+              const title = String(media.channelTitle ?? "");
+              const display = [vcn, callSign, title && title !== callSign ? `(${title})` : ""]
+                .filter(Boolean)
+                .join(" ");
+              resolvedAiringChannels = `${args.channel_id}=${display}`;
+            }
+          } catch {
+            // Continue without airing info.
+          }
         }
 
         // 4. Map subscription type: 2=season pass (show), 1=one-shot (movie or episode).
@@ -306,9 +381,8 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           "hints[guid]": programGuid,
         };
         if (args.program_title) params["hints[title]"] = args.program_title;
-        if (args.channel_key) params["params[airingChannels]"] = `channelKey=${args.channel_key}`;
-        if (args.airing_time !== undefined)
-          params["params[airingTimes]"] = String(args.airing_time);
+        if (resolvedAiringChannels) params["params[airingChannels]"] = resolvedAiringChannels;
+        if (resolvedAiringTime !== undefined) params["params[airingTimes]"] = resolvedAiringTime;
         if (sectionId !== undefined) {
           params["targetLibrarySectionID"] = String(sectionId);
         } else if (dvrSectionLocationId !== undefined) {

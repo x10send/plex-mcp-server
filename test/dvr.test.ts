@@ -433,7 +433,7 @@ describe("schedule_recording", () => {
     assert.match(text, /hints\[ratingKey\]/);
   });
 
-  it("sends channelKey-formatted airingChannels and airingTimes when provided", async () => {
+  it("uses channel_key+channel_id override without guide lookup", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
@@ -444,17 +444,53 @@ describe("schedule_recording", () => {
       "schedule_recording",
       {
         program_id: "1001",
+        channel_id: "ch-abc123",
         channel_key: "3.1 KTVKDT (Independent)",
         airing_time: 1780905600,
       },
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["params[airingChannels]"], "channelKey=3.1 KTVKDT (Independent)");
+    assert.equal(params?.["params[airingChannels]"], "ch-abc123=3.1 KTVKDT (Independent)");
     assert.equal(params?.["params[airingTimes]"], "1780905600");
   });
 
-  it("omits airingChannels and airingTimes when neither channel_key nor airing_time provided", async () => {
+  it("auto-resolves airingChannels and airingTimes via guide lookup when channel_id provided", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse("/tv.plex.providers.epg.cloud/grid", {
+      MediaContainer: {
+        Metadata: [
+          {
+            ratingKey: "plex://episode/abc",
+            Media: [
+              {
+                channelIdentifier: "ch-tnt",
+                channelVcn: "44.1",
+                channelCallSign: "KPHELD",
+                channelTitle: "Independent",
+                beginsAt: 1717200000,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "plex%3A%2F%2Fepisode%2Fabc", channel_id: "ch-tnt" },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.["params[airingChannels]"], "ch-tnt=44.1 KPHELD (Independent)");
+    assert.equal(params?.["params[airingTimes]"], "1717200000");
+  });
+
+  it("omits airingChannels and airingTimes when no channel_id and guide lookup not possible", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
