@@ -92,6 +92,22 @@ function msToTime(ms: number): string {
   return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
 }
 
+function matchesResolutionFilter(videoResolution: unknown, filter: string): boolean {
+  const r = String(videoResolution ?? "").toLowerCase();
+  switch (filter) {
+    case "4k":
+      return r === "4k";
+    case "1080p":
+      return r === "1080";
+    case "720p":
+      return r === "720";
+    case "sd":
+      return r !== "4k" && r !== "1080" && r !== "720";
+    default:
+      return true;
+  }
+}
+
 function formatItem(m: MediaItem): string {
   const key = m.ratingKey ?? m.key ?? "?";
   const title = String(m.title ?? "Unknown");
@@ -102,7 +118,23 @@ function formatItem(m: MediaItem): string {
     : m.parentTitle
       ? `${m.parentTitle} › `
       : "";
-  return `[${key}] ${prefix}${title}${year} [${type}]`;
+
+  const media = m.Media?.[0];
+  const quality: string[] = [];
+  if (media?.videoResolution) quality.push(formatResolution(media.videoResolution));
+  if (media?.bitrate) quality.push(formatBitrate(Number(media.bitrate)));
+  if (media?.videoCodec) quality.push(displayCodec(String(media.videoCodec)));
+  const audioCodec = media?.audioCodec ? displayCodec(String(media.audioCodec)) : "";
+  const audioChannels = media?.audioChannels
+    ? formatAudioChannels(Number(media.audioChannels))
+    : "";
+  if (audioCodec || audioChannels)
+    quality.push([audioCodec, audioChannels].filter(Boolean).join(" "));
+  const part = media?.Part?.[0];
+  if (part?.size) quality.push(formatFileSize(Number(part.size)));
+
+  const qualitySuffix = quality.length > 0 ? ` | ${quality.join(" | ")}` : "";
+  return `[${key}] ${prefix}${title}${year} [${type}]${qualitySuffix}`;
 }
 
 function formatDetail(m: MediaItem): string {
@@ -177,7 +209,7 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
 
   server.tool(
     "get_library_contents",
-    "List media items in a Plex library section. Supports filtering by genre, year, contentRating, studio, and unwatched status.",
+    "List media items in a Plex library section with inline quality details (resolution, bitrate, codec). Supports filtering by genre, year, contentRating, studio, unwatched status, resolution, and minimum bitrate.",
     {
       section_id: z.string().describe("Library section ID (from get_libraries)"),
       limit: z
@@ -200,6 +232,16 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
         .describe("Filter by content rating (e.g. PG-13, TV-MA)"),
       studio: z.string().optional().describe("Filter by studio name"),
       sort: z.string().optional().describe("Sort order (e.g. title, year, rating, addedAt)"),
+      resolution: z
+        .enum(["sd", "720p", "1080p", "4k"])
+        .optional()
+        .describe("Filter by video resolution: sd, 720p, 1080p, or 4k"),
+      min_bitrate: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe("Filter to items with bitrate at or above this threshold (kbps)"),
     },
     async ({
       section_id,
@@ -211,6 +253,8 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
       content_rating,
       studio,
       sort,
+      resolution,
+      min_bitrate,
     }) => {
       try {
         const params: Record<string, string> = {
@@ -227,8 +271,22 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
         const data = await client.get<
           PlexMediaContainer<{ totalSize?: number; Metadata?: MediaItem[] }>
         >(`/library/sections/${section_id}/all`, params);
-        const items = data.MediaContainer.Metadata ?? [];
+        let items = data.MediaContainer.Metadata ?? [];
         const total = data.MediaContainer.totalSize ?? items.length;
+
+        if (resolution !== undefined) {
+          items = items.filter((item) => {
+            const r = item.Media?.[0]?.videoResolution;
+            return r !== undefined && matchesResolutionFilter(r, resolution);
+          });
+        }
+        if (min_bitrate !== undefined) {
+          items = items.filter((item) => {
+            const b = item.Media?.[0]?.bitrate;
+            return b !== undefined && Number(b) >= min_bitrate;
+          });
+        }
+
         if (items.length === 0)
           return { content: [{ type: "text", text: "No items found matching the criteria." }] };
         const lines = items.map(formatItem);

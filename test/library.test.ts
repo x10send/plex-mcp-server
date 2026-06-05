@@ -81,6 +81,256 @@ describe("get_library_contents", () => {
     );
     assert.equal(isError, true);
   });
+
+  it("shows quality fields inline when Media is present", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 1,
+        Metadata: [
+          {
+            ratingKey: "20",
+            title: "Dune",
+            type: "movie",
+            year: 2021,
+            Media: [
+              {
+                videoResolution: "4k",
+                bitrate: 25000,
+                videoCodec: "hevc",
+                audioCodec: "truehd",
+                audioChannels: 8,
+                Part: [{ size: 55834574848 }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /Dune/);
+    assert.match(text, /4K/);
+    assert.match(text, /25\.0 Mbps/);
+    assert.match(text, /HEVC/);
+    assert.match(text, /TrueHD 7\.1/);
+    assert.match(text, /52\.00 GB/);
+  });
+
+  it("omits quality fields when item has no Media", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 1,
+        Metadata: [{ ratingKey: "21", title: "No Media Movie", type: "movie" }],
+      },
+    });
+    const { text } = await callTool(register, "get_library_contents", { section_id: "1" }, client);
+    assert.match(text, /No Media Movie \[movie\]/);
+    assert.doesNotMatch(text, /\|/);
+  });
+
+  it("filters by resolution=1080p", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 3,
+        Metadata: [
+          {
+            ratingKey: "30",
+            title: "HD Movie",
+            type: "movie",
+            Media: [{ videoResolution: "1080", bitrate: 8000 }],
+          },
+          {
+            ratingKey: "31",
+            title: "4K Movie",
+            type: "movie",
+            Media: [{ videoResolution: "4k", bitrate: 25000 }],
+          },
+          {
+            ratingKey: "32",
+            title: "SD Movie",
+            type: "movie",
+            Media: [{ videoResolution: "sd", bitrate: 1500 }],
+          },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "1080p" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /HD Movie/);
+    assert.doesNotMatch(text, /4K Movie/);
+    assert.doesNotMatch(text, /SD Movie/);
+  });
+
+  it("filters by resolution=4k", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 2,
+        Metadata: [
+          {
+            ratingKey: "33",
+            title: "4K Film",
+            type: "movie",
+            Media: [{ videoResolution: "4k", bitrate: 30000 }],
+          },
+          {
+            ratingKey: "34",
+            title: "1080 Film",
+            type: "movie",
+            Media: [{ videoResolution: "1080", bitrate: 8000 }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "4k" },
+      client
+    );
+    assert.match(text, /4K Film/);
+    assert.doesNotMatch(text, /1080 Film/);
+  });
+
+  it("filters by resolution=sd (matches sd and 480)", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 3,
+        Metadata: [
+          {
+            ratingKey: "35",
+            title: "Old TV",
+            type: "episode",
+            Media: [{ videoResolution: "sd", bitrate: 800 }],
+          },
+          {
+            ratingKey: "36",
+            title: "DVD Rip",
+            type: "movie",
+            Media: [{ videoResolution: "480", bitrate: 1200 }],
+          },
+          {
+            ratingKey: "37",
+            title: "HD Show",
+            type: "episode",
+            Media: [{ videoResolution: "720", bitrate: 4000 }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "sd" },
+      client
+    );
+    assert.match(text, /Old TV/);
+    assert.match(text, /DVD Rip/);
+    assert.doesNotMatch(text, /HD Show/);
+  });
+
+  it("filters by min_bitrate", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 3,
+        Metadata: [
+          {
+            ratingKey: "40",
+            title: "High Bitrate",
+            type: "movie",
+            Media: [{ videoResolution: "1080", bitrate: 15000 }],
+          },
+          {
+            ratingKey: "41",
+            title: "Low Bitrate",
+            type: "movie",
+            Media: [{ videoResolution: "1080", bitrate: 3000 }],
+          },
+          {
+            ratingKey: "42",
+            title: "No Bitrate",
+            type: "movie",
+            Media: [{ videoResolution: "1080" }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", min_bitrate: 10000 },
+      client
+    );
+    assert.match(text, /High Bitrate/);
+    assert.doesNotMatch(text, /Low Bitrate/);
+    assert.doesNotMatch(text, /No Bitrate/);
+  });
+
+  it("excludes items without Media when resolution filter is applied", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 2,
+        Metadata: [
+          {
+            ratingKey: "50",
+            title: "Has Media",
+            type: "movie",
+            Media: [{ videoResolution: "1080", bitrate: 8000 }],
+          },
+          { ratingKey: "51", title: "No Media", type: "movie" },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "1080p" },
+      client
+    );
+    assert.match(text, /Has Media/);
+    assert.doesNotMatch(text, /No Media/);
+  });
+
+  it("returns no-items message when all items filtered out by resolution", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 1,
+        Metadata: [
+          {
+            ratingKey: "60",
+            title: "SD Only",
+            type: "movie",
+            Media: [{ videoResolution: "sd", bitrate: 1000 }],
+          },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "4k" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /No items found/);
+  });
 });
 
 describe("get_children", () => {
