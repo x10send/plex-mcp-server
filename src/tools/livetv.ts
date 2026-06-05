@@ -14,6 +14,7 @@ interface EpgMedia {
 
 interface EpgProgram {
   ratingKey?: unknown;
+  key?: unknown; // full metadata path, e.g. /library/metadata/12345 — used as programKey for DVR
   title?: unknown;
   type?: unknown;
   year?: unknown;
@@ -110,11 +111,13 @@ function formatProgram(p: EpgProgram): string {
 
   const summary = p.summary ? `\n  ${String(p.summary).slice(0, 200)}` : "";
   const genreLine = genres ? `\n  Genre: ${genres}` : "";
-  const programId = p.ratingKey ? `\n  Program ID: ${p.ratingKey}` : "";
+  // Prefer the full key path (what Plex needs as programKey for DVR scheduling)
+  const programId = p.key ?? p.ratingKey;
+  const programIdLine = programId ? `\n  Program ID: ${programId}` : "";
 
   return (
     `${episodePrefix}${title}${year} [${type}]${rating}${contentRating}\n` +
-    `${channel}${channelKey}${timeRange}${genreLine}${summary}${programId}`
+    `${channel}${channelKey}${timeRange}${genreLine}${summary}${programIdLine}`
   );
 }
 

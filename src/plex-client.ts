@@ -55,7 +55,8 @@ export class PlexClient implements IPlexClient {
     const url = this.buildUrl(path, params);
     const res = await fetch(url, { method, headers: this.headers });
     if (!res.ok) throw new PlexApiError(res.status, await this.errorText(res));
-    return res.json() as Promise<T>;
+    const text = await res.text();
+    return (text.trim() ? JSON.parse(text) : undefined) as T;
   }
 
   private buildUrl(path: string, params?: Record<string, string>): string {

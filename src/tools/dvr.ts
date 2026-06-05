@@ -82,8 +82,10 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
       program_id: z
         .string()
         .min(1)
-        .max(100)
-        .describe("Program ID (ratingKey) from get_live_tv_guide"),
+        .max(200)
+        .describe(
+          "Program ID from get_live_tv_guide (the full key path, e.g. /library/metadata/12345)"
+        ),
       channel_id: z
         .string()
         .min(1)

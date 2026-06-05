@@ -25,6 +25,7 @@ const PROVIDERS_WITHOUT_EPG = {
 function makeProgram(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ratingKey: "1001",
+    key: "/library/metadata/1001",
     title: "National Treasure",
     type: "movie",
     year: 2004,
@@ -48,6 +49,7 @@ function makeProgram(overrides: Record<string, unknown> = {}): Record<string, un
 function makeEpisode(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     ratingKey: "2001",
+    key: "/library/metadata/2001",
     title: "Pilot",
     type: "episode",
     grandparentTitle: "Breaking Bad",
@@ -82,7 +84,7 @@ describe("get_live_tv_guide", () => {
     assert.match(text, /TNT/);
     assert.match(text, /PG/);
     assert.match(text, /Adventure/);
-    assert.match(text, /Program ID: 1001/);
+    assert.match(text, /Program ID: \/library\/metadata\/1001/);
   });
 
   it("returns not-configured message when no EPG provider", async () => {
@@ -174,7 +176,7 @@ describe("get_live_tv_guide", () => {
     const { text } = await callTool(register, "get_live_tv_guide", {}, client);
     assert.match(text, /Breaking Bad S1E1: Pilot/);
     assert.match(text, /AMC/);
-    assert.match(text, /Program ID: 2001/);
+    assert.match(text, /Program ID: \/library\/metadata\/2001/);
   });
 
   it("filters by query (title match)", async () => {
@@ -288,6 +290,33 @@ describe("get_live_tv_guide", () => {
     });
     const { text } = await callTool(register, "get_live_tv_guide", {}, client);
     assert.match(text, /★7\.5/);
+  });
+
+  it("uses key field as Program ID when present", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
+    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+      MediaContainer: {
+        Metadata: [
+          { ratingKey: "999", key: "/library/metadata/999", title: "A Movie", type: "movie" },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_live_tv_guide", {}, client);
+    assert.match(text, /Program ID: \/library\/metadata\/999/);
+  });
+
+  it("falls back to ratingKey as Program ID when key is absent", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
+    client.setResponse("/media/providers/tv.plex.provider.epg/items", {
+      MediaContainer: {
+        Metadata: [{ ratingKey: "888", title: "Old Entry", type: "movie" }],
+      },
+    });
+    const { text } = await callTool(register, "get_live_tv_guide", {}, client);
+    assert.match(text, /Program ID: 888/);
+    assert.doesNotMatch(text, /library\/metadata/);
   });
 
   it("handles program with no Media gracefully", async () => {

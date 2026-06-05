@@ -114,6 +114,26 @@ describe("PlexClient.get", () => {
   });
 });
 
+describe("PlexClient.delete — empty response bodies", () => {
+  it("succeeds when Plex returns 200 with empty body", async () => {
+    (globalThis as Record<string, unknown>)["fetch"] = async () => {
+      return new Response("", { status: 200 });
+    };
+    const client = new PlexClient(CONFIG);
+    const result = await client.delete<unknown>("/dvr/subscriptions/42");
+    assert.equal(result, undefined);
+  });
+
+  it("succeeds when Plex returns 204 No Content", async () => {
+    (globalThis as Record<string, unknown>)["fetch"] = async () => {
+      return new Response(null, { status: 204 });
+    };
+    const client = new PlexClient(CONFIG);
+    const result = await client.delete<unknown>("/dvr/subscriptions/42");
+    assert.equal(result, undefined);
+  });
+});
+
 describe("PlexApiError", () => {
   it("has correct name and status", () => {
     const err = new PlexApiError(404, "Not found");

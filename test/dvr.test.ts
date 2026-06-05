@@ -148,6 +148,43 @@ describe("schedule_recording", () => {
     assert.equal(isError, true);
     assert.match(text, /422/);
   });
+
+  it("sends programKey and channelKey as POST params", async () => {
+    const client = makeMockClient();
+    client.setResponse("/dvr/subscriptions", {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "/library/metadata/1001", channel_id: "/livetv/channels/ch-tnt" },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.programKey, "/library/metadata/1001");
+    assert.equal(params?.channelKey, "/livetv/channels/ch-tnt");
+  });
+
+  it("sends negative startTimeOffset for pre-roll seconds", async () => {
+    const client = makeMockClient();
+    client.setResponse("/dvr/subscriptions", {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      {
+        program_id: "/library/metadata/1001",
+        channel_id: "/livetv/channels/ch-tnt",
+        start_offset_seconds: 30,
+        end_offset_seconds: 120,
+      },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.startTimeOffset, "-30");
+    assert.equal(params?.endTimeOffset, "120");
+  });
 });
 
 // ── cancel_recording ──────────────────────────────────────────────────────────
