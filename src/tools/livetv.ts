@@ -246,13 +246,14 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
           return { content: [{ type: "text", text: NOT_CONFIGURED }] };
         }
 
-        // Plex EPG grid uses comparison-operator params: beginsAt> and endsAt<
-        // (URL-encoded as beginsAt%3E and endsAt%3C on the wire).
+        // Plex EPG grid uses comparison-operator params: beginsAt< and endsAt>
+        // (URL-encoded as beginsAt%3C and endsAt%3E on the wire).
+        // Standard interval-overlap query: programs where beginsAt < windowEnd AND endsAt > windowStart.
         // gridStart/gridEnd are silently ignored by the cloud EPG and return empty results.
         // type and channelKey server params are not reliably supported — filter client-side.
         const params: Record<string, string> = {
-          "beginsAt>": Math.floor(startMs / 1000).toString(),
-          "endsAt<": Math.floor(endMs / 1000).toString(),
+          "beginsAt<": Math.floor(endMs / 1000).toString(),
+          "endsAt>": Math.floor(startMs / 1000).toString(),
         };
 
         let programs: EpgProgram[] = [];

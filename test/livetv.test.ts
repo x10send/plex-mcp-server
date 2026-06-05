@@ -474,15 +474,16 @@ describe("get_live_tv_guide", () => {
     assert.equal(client.getLastGetParams()?.["channelKey"], undefined);
   });
 
-  it("sends correct beginsAt> and endsAt< params for time window", async () => {
+  it("sends correct beginsAt< and endsAt> params for time window", async () => {
     const client = makeMockClient();
     client.setResponse("/media/providers", PROVIDERS_WITH_EPG);
     client.setResponse(GUIDE_PATH, { MediaContainer: { Metadata: [makeProgram()] } });
-    // start=1000000 (Unix seconds), hours=2 → endsAt = 1000000 + 7200 = 1007200
+    // start=1000000 (Unix seconds), hours=2 → window end = 1000000 + 7200 = 1007200
+    // beginsAt < windowEnd (1007200), endsAt > windowStart (1000000)
     await callTool(register, "get_live_tv_guide", { start: "1000000", hours: 2 }, client);
     const params = client.getLastGetParams();
-    assert.equal(params?.["beginsAt>"], "1000000");
-    assert.equal(params?.["endsAt<"], "1007200");
+    assert.equal(params?.["beginsAt<"], "1007200");
+    assert.equal(params?.["endsAt>"], "1000000");
   });
 
   it("debug mode returns diagnostic report instead of formatted programs", async () => {
