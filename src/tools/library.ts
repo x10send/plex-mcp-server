@@ -2,6 +2,20 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { type IPlexClient, PlexApiError } from "../plex-client.js";
 
+interface PlexMediaPart {
+  size?: unknown;
+}
+
+interface PlexMedia {
+  videoResolution?: unknown;
+  bitrate?: unknown;
+  videoCodec?: unknown;
+  audioCodec?: unknown;
+  audioChannels?: unknown;
+  container?: unknown;
+  Part?: PlexMediaPart[];
+}
+
 interface MediaItem {
   ratingKey?: unknown;
   key?: unknown;
@@ -18,10 +32,57 @@ interface MediaItem {
   contentRating?: unknown;
   viewCount?: unknown;
   viewOffset?: unknown;
+  Media?: PlexMedia[];
 }
 
 interface PlexMediaContainer<T> {
   MediaContainer: T;
+}
+
+const CODEC_DISPLAY: Record<string, string> = {
+  h264: "H.264",
+  hevc: "HEVC (H.265)",
+  mpeg4: "MPEG-4",
+  mpeg2video: "MPEG-2",
+  vp9: "VP9",
+  av1: "AV1",
+  aac: "AAC",
+  ac3: "Dolby Digital",
+  eac3: "Dolby Digital Plus",
+  dca: "DTS",
+  truehd: "TrueHD",
+  mp3: "MP3",
+  flac: "FLAC",
+  opus: "Opus",
+};
+
+function displayCodec(codec: string): string {
+  return CODEC_DISPLAY[codec.toLowerCase()] ?? codec.toUpperCase();
+}
+
+function formatResolution(r: unknown): string {
+  const s = String(r).toLowerCase();
+  if (s === "4k") return "4K";
+  if (s === "1080") return "1080p";
+  if (s === "720") return "720p";
+  if (s === "480") return "480p";
+  if (s === "sd") return "SD";
+  return String(r);
+}
+
+function formatBitrate(kbps: number): string {
+  return kbps >= 1000 ? `${(kbps / 1000).toFixed(1)} Mbps` : `${kbps} kbps`;
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes >= 1_073_741_824) return `${(bytes / 1_073_741_824).toFixed(2)} GB`;
+  if (bytes >= 1_048_576) return `${(bytes / 1_048_576).toFixed(0)} MB`;
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
+function formatAudioChannels(ch: number): string {
+  const map: Record<number, string> = { 1: "Mono", 2: "Stereo", 6: "5.1", 8: "7.1" };
+  return map[ch] ?? `${ch} ch`;
 }
 
 function msToTime(ms: number): string {
@@ -60,6 +121,24 @@ function formatDetail(m: MediaItem): string {
   if (m.parentTitle) lines.push(`Season: ${m.parentTitle}`);
   if (m.index) lines.push(`Episode/Track: ${m.index}`);
   if (m.viewCount) lines.push(`Play Count: ${m.viewCount}`);
+
+  const media = m.Media?.[0];
+  if (media) {
+    if (media.videoResolution) lines.push(`Resolution: ${formatResolution(media.videoResolution)}`);
+    if (media.bitrate) lines.push(`Bitrate: ${formatBitrate(Number(media.bitrate))}`);
+    if (media.videoCodec) lines.push(`Video Codec: ${displayCodec(String(media.videoCodec))}`);
+    const audioCodec = media.audioCodec ? displayCodec(String(media.audioCodec)) : "";
+    const audioChannels = media.audioChannels
+      ? formatAudioChannels(Number(media.audioChannels))
+      : "";
+    if (audioCodec || audioChannels) {
+      lines.push(`Audio: ${[audioCodec, audioChannels].filter(Boolean).join(" ")}`);
+    }
+    if (media.container) lines.push(`Container: ${String(media.container).toUpperCase()}`);
+    const part = media.Part?.[0];
+    if (part?.size) lines.push(`File Size: ${formatFileSize(Number(part.size))}`);
+  }
+
   return lines.join("\n");
 }
 

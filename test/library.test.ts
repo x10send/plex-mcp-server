@@ -153,6 +153,111 @@ describe("get_media_info", () => {
     const { text } = await callTool(register, "get_media_info", { rating_key: "999" }, client);
     assert.match(text, /No media found/);
   });
+
+  it("includes media quality fields when Media array is present", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/metadata/10", {
+      MediaContainer: {
+        Metadata: [
+          {
+            ratingKey: "10",
+            title: "Dune",
+            type: "movie",
+            Media: [
+              {
+                videoResolution: "4k",
+                bitrate: 25000,
+                videoCodec: "hevc",
+                audioCodec: "eac3",
+                audioChannels: 6,
+                container: "mkv",
+                Part: [{ size: 55834574848 }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "get_media_info",
+      { rating_key: "10" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /Resolution: 4K/);
+    assert.match(text, /Bitrate: 25\.0 Mbps/);
+    assert.match(text, /Video Codec: HEVC \(H\.265\)/);
+    assert.match(text, /Audio: Dolby Digital Plus 5\.1/);
+    assert.match(text, /Container: MKV/);
+    assert.match(text, /File Size: 52\.00 GB/);
+  });
+
+  it("formats 1080p H.264 AAC Stereo correctly", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/metadata/11", {
+      MediaContainer: {
+        Metadata: [
+          {
+            ratingKey: "11",
+            title: "Interstellar",
+            type: "movie",
+            Media: [
+              {
+                videoResolution: "1080",
+                bitrate: 8500,
+                videoCodec: "h264",
+                audioCodec: "aac",
+                audioChannels: 2,
+                container: "mp4",
+                Part: [{ size: 8053063680 }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_media_info", { rating_key: "11" }, client);
+    assert.match(text, /Resolution: 1080p/);
+    assert.match(text, /Bitrate: 8\.5 Mbps/);
+    assert.match(text, /Video Codec: H\.264/);
+    assert.match(text, /Audio: AAC Stereo/);
+    assert.match(text, /Container: MP4/);
+    assert.match(text, /File Size: 7\.50 GB/);
+  });
+
+  it("omits media quality section when no Media array", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/metadata/12", {
+      MediaContainer: {
+        Metadata: [{ ratingKey: "12", title: "Old Entry", type: "movie" }],
+      },
+    });
+    const { text } = await callTool(register, "get_media_info", { rating_key: "12" }, client);
+    assert.doesNotMatch(text, /Resolution:/);
+    assert.doesNotMatch(text, /Bitrate:/);
+    assert.doesNotMatch(text, /File Size:/);
+  });
+
+  it("handles low-bitrate sub-1Mbps items", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/metadata/13", {
+      MediaContainer: {
+        Metadata: [
+          {
+            ratingKey: "13",
+            title: "Old Show",
+            type: "episode",
+            Media: [{ videoResolution: "sd", bitrate: 800, videoCodec: "mpeg2video" }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_media_info", { rating_key: "13" }, client);
+    assert.match(text, /Resolution: SD/);
+    assert.match(text, /800 kbps/);
+    assert.match(text, /Video Codec: MPEG-2/);
+  });
 });
 
 describe("get_media_extras", () => {
