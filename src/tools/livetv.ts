@@ -36,15 +36,18 @@ interface EpgFeature {
 
 interface MediaProvider {
   identifier?: unknown;
+  title?: unknown;
+  type?: unknown;
   Feature?: EpgFeature[];
+  [key: string]: unknown;
 }
 
 interface ProvidersResponse {
-  MediaContainer: { MediaProvider?: MediaProvider[] };
+  MediaContainer: { MediaProvider?: MediaProvider[]; [key: string]: unknown };
 }
 
 interface GuideResponse {
-  MediaContainer: { Metadata?: EpgProgram[] };
+  MediaContainer: { Metadata?: EpgProgram[]; [key: string]: unknown };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -181,6 +184,12 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
         .describe(
           "Filter by genre — case-insensitive substring match (e.g. 'adventure', 'action')"
         ),
+      debug: z
+        .boolean()
+        .optional()
+        .describe(
+          "Return raw diagnostic data (provider list, exact params, raw guide response) instead of formatted programs. Use when the guide returns empty results to diagnose what Plex is sending back."
+        ),
     },
     async (args) => {
       const nowMs = Date.now();
@@ -218,6 +227,29 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
         const triedPaths: string[] = [];
         let anySucceeded = false;
 
+        // debug mode: collect raw provider and response data for diagnosis
+        const debugLines: string[] = [];
+        if (args.debug) {
+          debugLines.push(`=== EPG Debug Report ===`);
+          debugLines.push(`\n-- /media/providers: ${epgProviders.length} EPG provider(s) --`);
+          for (const p of epgProviders) {
+            debugLines.push(
+              `  identifier: ${p.identifier}  title: ${p.title ?? "(none)"}  type: ${p.type ?? "(none)"}`
+            );
+            for (const f of p.Feature ?? []) {
+              debugLines.push(
+                `    feature  type: ${f.type ?? "(none)"}  key: ${f.key ?? "(none)"}`
+              );
+            }
+            const otherKeys = Object.keys(p).filter(
+              (k) => !["identifier", "title", "type", "Feature"].includes(k)
+            );
+            if (otherKeys.length) debugLines.push(`    other keys: ${otherKeys.join(", ")}`);
+          }
+          debugLines.push(`\n-- Grid params --`);
+          debugLines.push(`  ${JSON.stringify(params)}`);
+        }
+
         for (const epgProvider of epgProviders) {
           // Plex cloud EPG uses type "grid" with gridStart/gridEnd params.
           // Older/local EPG may use type "guide". "content" and "items" features
@@ -243,14 +275,30 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
             const guide = await client.get<GuideResponse>(guidePath, params);
             anySucceeded = true;
             const results = guide.MediaContainer?.Metadata ?? [];
+            if (args.debug) {
+              debugLines.push(`\n-- ${guidePath} → 200 OK --`);
+              const containerKeys = Object.keys(guide.MediaContainer ?? {});
+              debugLines.push(`  MediaContainer keys: ${containerKeys.join(", ")}`);
+              debugLines.push(`  Metadata count: ${results.length}`);
+              // Dump full raw container (truncated) so we can see what fields Plex returns
+              const raw = JSON.stringify(guide.MediaContainer).slice(0, 2000);
+              debugLines.push(`  Raw (first 2000 chars):\n${raw}`);
+            }
             if (results.length > 0) {
               programs = results;
-              break;
+              if (!args.debug) break;
             }
           } catch (guideErr) {
-            if (guideErr instanceof PlexApiError && guideErr.status === 404) continue;
+            if (guideErr instanceof PlexApiError && guideErr.status === 404) {
+              if (args.debug) debugLines.push(`\n-- ${guidePath} → 404 Not Found --`);
+              continue;
+            }
             return toolError(guideErr);
           }
+        }
+
+        if (args.debug) {
+          return { content: [{ type: "text", text: debugLines.join("\n") }] };
         }
 
         if (!anySucceeded) {
