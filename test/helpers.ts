@@ -9,12 +9,14 @@ export interface MockPlexClient extends IPlexClient {
   setResponse(path: string, response: AnyRecord): void;
   setError(path: string, status: number, message: string): void;
   getLastPostParams(): Record<string, string> | undefined;
+  getLastGetParams(): Record<string, string> | undefined;
 }
 
 export function makeMockClient(): MockPlexClient {
   const responses = new Map<string, AnyRecord>();
   const errors = new Map<string, { status: number; message: string }>();
   let lastPostParams: Record<string, string> | undefined;
+  let lastGetParams: Record<string, string> | undefined;
 
   return {
     setResponse(path: string, response: AnyRecord) {
@@ -26,7 +28,11 @@ export function makeMockClient(): MockPlexClient {
     getLastPostParams() {
       return lastPostParams;
     },
-    async get<T>(path: string): Promise<T> {
+    getLastGetParams() {
+      return lastGetParams;
+    },
+    async get<T>(path: string, params?: Record<string, string>): Promise<T> {
+      lastGetParams = params;
       const err = errors.get(path);
       if (err) {
         const { PlexApiError } = await import("../src/plex-client.js");

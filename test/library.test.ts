@@ -331,6 +331,52 @@ describe("get_library_contents", () => {
     assert.equal(isError, false);
     assert.match(text, /No items found/);
   });
+
+  it("passes videoResolution=1080 to server for resolution=1080p", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 0, Metadata: [] },
+    });
+    await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "1080p" },
+      client
+    );
+    assert.equal(client.getLastGetParams()?.["videoResolution"], "1080");
+  });
+
+  it("passes videoResolution=720 to server for resolution=720p", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 0, Metadata: [] },
+    });
+    await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", resolution: "720p" },
+      client
+    );
+    assert.equal(client.getLastGetParams()?.["videoResolution"], "720");
+  });
+
+  it("passes videoResolution=4k to server for resolution=4k", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 0, Metadata: [] },
+    });
+    await callTool(register, "get_library_contents", { section_id: "1", resolution: "4k" }, client);
+    assert.equal(client.getLastGetParams()?.["videoResolution"], "4k");
+  });
+
+  it("does not pass videoResolution param for resolution=sd (client-side only)", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 0, Metadata: [] },
+    });
+    await callTool(register, "get_library_contents", { section_id: "1", resolution: "sd" }, client);
+    assert.equal(client.getLastGetParams()?.["videoResolution"], undefined);
+  });
 });
 
 describe("get_children", () => {
