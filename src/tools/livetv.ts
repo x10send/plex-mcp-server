@@ -100,24 +100,27 @@ function formatProgram(p: EpgProgram): string {
     .join(", ");
 
   const media = p.Media?.[0];
-  const channel = media?.channelCallSign ? `\n  Channel: ${media.channelCallSign}` : "";
-  const channelKey = media?.channelKey ? `\n  Channel ID: ${String(media.channelKey)}` : "";
   const startsMs = media?.startsAt !== undefined ? Number(media.startsAt) * 1000 : undefined;
   const endsMs = media?.endsAt !== undefined ? Number(media.endsAt) * 1000 : undefined;
-  const timeRange =
-    startsMs !== undefined
-      ? `\n  Airs: ${formatTime(startsMs)}${endsMs !== undefined ? ` → ${formatTime(endsMs)}` : ""}`
-      : "";
-
-  const summary = p.summary ? `\n  ${String(p.summary).slice(0, 200)}` : "";
-  const genreLine = genres ? `\n  Genre: ${genres}` : "";
   // Prefer the full key path (what Plex needs as programKey for DVR scheduling)
   const programId = p.key ?? p.ratingKey;
-  const programIdLine = programId ? `\n  Program ID: ${programId}` : "";
+
+  const details = [
+    media?.channelCallSign ? `  Channel: ${media.channelCallSign}` : "",
+    media?.channelKey ? `  Channel ID: ${String(media.channelKey)}` : "",
+    startsMs !== undefined
+      ? `  Airs: ${formatTime(startsMs)}${endsMs !== undefined ? ` → ${formatTime(endsMs)}` : ""}`
+      : "",
+    genres ? `  Genre: ${genres}` : "",
+    p.summary ? `  ${String(p.summary).slice(0, 200)}` : "",
+    programId ? `  Program ID: ${programId}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   return (
-    `${episodePrefix}${title}${year} [${type}]${rating}${contentRating}\n` +
-    `${channel}${channelKey}${timeRange}${genreLine}${summary}${programIdLine}`
+    `${episodePrefix}${title}${year} [${type}]${rating}${contentRating}` +
+    (details ? `\n${details}` : "")
   );
 }
 
