@@ -40,6 +40,64 @@ describe("search_media", () => {
     const { isError } = await callTool(register, "search_media", { query: "test" }, client);
     assert.equal(isError, true);
   });
+
+  it("uses section-specific path when section_id provided", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/2/search", {
+      MediaContainer: {
+        Metadata: [{ ratingKey: "5", title: "CSI", type: "show" }],
+      },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "search_media",
+      { query: "CSI", section_id: "2" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /CSI/);
+  });
+
+  it("sends type numeric code when type filter provided", async () => {
+    const client = makeMockClient();
+    client.setResponse("/search", {
+      MediaContainer: { Metadata: [{ ratingKey: "3", title: "Die Hard", type: "movie" }] },
+    });
+    await callTool(register, "search_media", { query: "Die Hard", type: "movie" }, client);
+    assert.equal(client.getLastGetParams()?.["type"], "1");
+  });
+
+  it("sends type=4 for episode filter", async () => {
+    const client = makeMockClient();
+    client.setResponse("/search", { MediaContainer: { Metadata: [] } });
+    await callTool(register, "search_media", { query: "pilot", type: "episode" }, client);
+    assert.equal(client.getLastGetParams()?.["type"], "4");
+  });
+
+  it("sends type=10 for track filter", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/3/search", { MediaContainer: { Metadata: [] } });
+    await callTool(
+      register,
+      "search_media",
+      { query: "hurt", section_id: "3", type: "track" },
+      client
+    );
+    assert.equal(client.getLastGetParams()?.["type"], "10");
+  });
+
+  it("accepts limit up to 100", async () => {
+    const client = makeMockClient();
+    client.setResponse("/search", { MediaContainer: { Metadata: [] } });
+    const { isError } = await callTool(
+      register,
+      "search_media",
+      { query: "test", limit: 100 },
+      client
+    );
+    assert.equal(isError, false);
+    assert.equal(client.getLastGetParams()?.["limit"], "100");
+  });
 });
 
 describe("get_genres", () => {

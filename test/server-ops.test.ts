@@ -207,7 +207,54 @@ describe("get_server_statistics", () => {
 // ── get_activities ────────────────────────────────────────────────────────────
 
 describe("get_activities", () => {
-  it("returns activity list with progress and subtitle", async () => {
+  it("returns no-activities message when empty", async () => {
+    const client = makeMockClient();
+    client.setResponse("/activities", { MediaContainer: { Activity: [] } });
+    const { text } = await callTool(register, "get_activities", {}, client);
+    assert.match(text, /No active background activities/);
+  });
+
+  it("groups activities by type with recordings first", async () => {
+    const client = makeMockClient();
+    client.setResponse("/activities", {
+      MediaContainer: {
+        Activity: [
+          { title: "Refreshing Sub", subtitle: "file.srt", progress: 50, cancellable: false },
+          { title: "Refreshing Sub", subtitle: "other.srt", progress: 0, cancellable: false },
+          { title: "Recording", subtitle: "Joe Kidd", progress: 9, cancellable: true },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(register, "get_activities", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /Background activities \(3\)/);
+    // Recording section appears before Subtitle section
+    const recIdx = text.indexOf("Recordings");
+    const subIdx = text.indexOf("Subtitle");
+    assert.ok(recIdx < subIdx, "Recordings section should precede Subtitle section");
+    assert.match(text, /Recordings \(1\)/);
+    assert.match(text, /Recording/);
+    assert.match(text, /\[cancellable\]/);
+  });
+
+  it("collapses repetitive subtitle jobs into a summary line", async () => {
+    const client = makeMockClient();
+    const subtitles = Array.from({ length: 10 }, (_, i) => ({
+      title: "Refreshing Sub",
+      subtitle: `file${i}.srt`,
+      progress: i * 5,
+      cancellable: false,
+    }));
+    client.setResponse("/activities", { MediaContainer: { Activity: subtitles } });
+    const { text } = await callTool(register, "get_activities", {}, client);
+    assert.match(text, /Subtitle Refresh \(10\):/);
+    assert.match(text, /10 jobs in progress/);
+    assert.match(text, /avg/);
+    // Individual file paths should NOT be listed
+    assert.doesNotMatch(text, /file0\.srt/);
+  });
+
+  it("lists individual items when below collapse threshold", async () => {
     const client = makeMockClient();
     client.setResponse("/activities", {
       MediaContainer: {
@@ -218,11 +265,7 @@ describe("get_activities", () => {
             progress: 42,
             cancellable: true,
           },
-          {
-            title: "Refreshing metadata",
-            progress: 80,
-            cancellable: false,
-          },
+          { title: "Refreshing metadata", progress: 80, cancellable: false },
         ],
       },
     });
@@ -234,15 +277,95 @@ describe("get_activities", () => {
     assert.match(text, /Processing \/media\/movies/);
     assert.match(text, /Progress: 42%/);
     assert.match(text, /Refreshing metadata/);
-    // [cancellable] appears exactly once (only on Scanning Movies, not Refreshing)
     assert.equal((text.match(/\[cancellable\]/g) ?? []).length, 1);
   });
 
-  it("returns no-activities message when empty", async () => {
+  it("shows stalled count in collapsed summary", async () => {
     const client = makeMockClient();
-    client.setResponse("/activities", { MediaContainer: { Activity: [] } });
+    const jobs = [
+      { title: "Refreshing Sub", progress: 0 },
+      { title: "Refreshing Sub", progress: 0 },
+      { title: "Refreshing Sub", progress: 0 },
+      { title: "Refreshing Sub", progress: 50 },
+    ];
+    client.setResponse("/activities", { MediaContainer: { Activity: jobs } });
     const { text } = await callTool(register, "get_activities", {}, client);
-    assert.match(text, /No active background activities/);
+    assert.match(text, /stalled/);
+  });
+
+  it("type=recording returns only recording tasks", async () => {
+    const client = makeMockClient();
+    client.setResponse("/activities", {
+      MediaContainer: {
+        Activity: [
+          { title: "Recording", subtitle: "Joe Kidd", progress: 9, cancellable: true },
+          { title: "Refreshing Sub", progress: 50 },
+          { title: "Recording", subtitle: "Matlock S4E14", progress: 18, cancellable: true },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "get_activities",
+      { type: "recording" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /Recordings \(2\)/);
+    assert.match(text, /Joe Kidd/);
+    assert.match(text, /Matlock/);
+    assert.doesNotMatch(text, /Refreshing Sub/);
+  });
+
+  it("type=subtitle returns only subtitle tasks", async () => {
+    const client = makeMockClient();
+    client.setResponse("/activities", {
+      MediaContainer: {
+        Activity: [
+          { title: "Recording", subtitle: "Movie", progress: 9 },
+          { title: "Refreshing Sub", progress: 50 },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_activities", { type: "subtitle" }, client);
+    assert.match(text, /Subtitle Refresh \(1\)/);
+    assert.doesNotMatch(text, /Recording/);
+  });
+
+  it("type filter returns no-match message when nothing matches", async () => {
+    const client = makeMockClient();
+    client.setResponse("/activities", {
+      MediaContainer: {
+        Activity: [{ title: "Refreshing Sub", progress: 50 }],
+      },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "get_activities",
+      { type: "recording" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /No active recording activities/);
+  });
+
+  it("classifies DVR type field as recording", async () => {
+    const client = makeMockClient();
+    client.setResponse("/activities", {
+      MediaContainer: {
+        Activity: [
+          {
+            type: "DVRRecorderActivity.Record",
+            title: "DVR Record",
+            progress: 45,
+            cancellable: true,
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_activities", { type: "recording" }, client);
+    assert.match(text, /Recordings \(1\)/);
+    assert.match(text, /DVR Record/);
   });
 
   it("handles activity with no subtitle or progress", async () => {

@@ -408,6 +408,121 @@ describe("get_library_contents", () => {
     assert.match(text, /UHD Film/);
     assert.doesNotMatch(text, /Standard Film/);
   });
+
+  it("sends addedAt>> param for added_after with relative shorthand", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 0, Metadata: [] },
+    });
+    const before = Math.floor((Date.now() - 7 * 86_400_000) / 1000);
+    await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", added_after: "7d" },
+      client
+    );
+    const sent = Number(client.getLastGetParams()?.["addedAt>>"]);
+    assert.ok(!isNaN(sent), "addedAt>> param should be a number");
+    // Timestamp should be within 5 seconds of expected (7d ago)
+    assert.ok(Math.abs(sent - before) < 5, `timestamp ${sent} should be near ${before}`);
+  });
+
+  it("sends addedAt>> param for added_after with ISO date", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 0, Metadata: [] },
+    });
+    await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", added_after: "2026-06-01" },
+      client
+    );
+    const sent = Number(client.getLastGetParams()?.["addedAt>>"]);
+    const expected = Math.floor(new Date("2026-06-01").getTime() / 1000);
+    assert.equal(sent, expected);
+  });
+
+  it("sends addedAt<< param for added_before", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 0, Metadata: [] },
+    });
+    await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", added_before: "2026-06-01" },
+      client
+    );
+    const sent = Number(client.getLastGetParams()?.["addedAt<<"]);
+    const expected = Math.floor(new Date("2026-06-01").getTime() / 1000);
+    assert.equal(sent, expected);
+  });
+
+  it("sends both addedAt>> and addedAt<< for date range", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 0, Metadata: [] },
+    });
+    await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", added_after: "2026-05-01", added_before: "2026-06-01" },
+      client
+    );
+    const params = client.getLastGetParams();
+    assert.ok(params?.["addedAt>>"] !== undefined, "should send addedAt>>");
+    assert.ok(params?.["addedAt<<"] !== undefined, "should send addedAt<<");
+  });
+
+  it("includes addedAt in item output when field is present", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 1,
+        Metadata: [
+          {
+            ratingKey: "70",
+            title: "Recent Movie",
+            type: "movie",
+            year: 2026,
+            addedAt: 1748736000, // 2025-06-01 00:00:00 UTC
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_library_contents", { section_id: "1" }, client);
+    assert.match(text, /Added:/);
+    assert.match(text, /Recent Movie/);
+  });
+
+  it("omits Added field when addedAt is not present in item", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: {
+        totalSize: 1,
+        Metadata: [{ ratingKey: "71", title: "No Date Movie", type: "movie" }],
+      },
+    });
+    const { text } = await callTool(register, "get_library_contents", { section_id: "1" }, client);
+    assert.doesNotMatch(text, /Added:/);
+  });
+
+  it("parses 24h relative shorthand correctly", async () => {
+    const client = makeMockClient();
+    client.setResponse("/library/sections/1/all", {
+      MediaContainer: { totalSize: 0, Metadata: [] },
+    });
+    const before = Math.floor((Date.now() - 86_400_000) / 1000);
+    await callTool(
+      register,
+      "get_library_contents",
+      { section_id: "1", added_after: "24h" },
+      client
+    );
+    const sent = Number(client.getLastGetParams()?.["addedAt>>"]);
+    assert.ok(Math.abs(sent - before) < 5, `timestamp ${sent} should be near ${before}`);
+  });
 });
 
 describe("get_children", () => {

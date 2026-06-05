@@ -40,26 +40,46 @@ function formatItem(m: MediaItem): string {
   return `[${key}] ${prefix}${title}${year} [${type}]`;
 }
 
+// Maps friendly type names to Plex numeric type codes.
+const PLEX_TYPE: Record<string, string> = {
+  movie: "1",
+  show: "2",
+  season: "3",
+  episode: "4",
+  artist: "8",
+  album: "9",
+  track: "10",
+  photo: "13",
+};
+
 export function registerDiscoveryTools(server: McpServer, client: IPlexClient): void {
   server.tool(
     "search_media",
-    "Full-text search for movies, TV shows, episodes, or music across all Plex libraries.",
+    "Full-text search for movies, TV shows, episodes, or music. Optionally scope to a specific library section and/or content type.",
     {
       query: z.string().min(1).describe("Search query string"),
       limit: z
         .number()
         .int()
         .min(1)
-        .max(50)
+        .max(100)
         .optional()
         .describe("Max results to return (default 20)"),
+      section_id: NUMERIC_ID.optional().describe(
+        "Scope search to a specific library section (from get_libraries). Searches all libraries when omitted."
+      ),
+      type: z
+        .enum(["movie", "show", "episode", "artist", "album", "track", "photo"])
+        .optional()
+        .describe("Filter by content type"),
     },
-    async ({ query, limit = 20 }) => {
+    async ({ query, limit = 20, section_id, type }) => {
       try {
-        const data = await client.get<PlexMediaContainer<{ Metadata?: MediaItem[] }>>("/search", {
-          query,
-          limit: String(limit),
-        });
+        const params: Record<string, string> = { query, limit: String(limit) };
+        if (type) params["type"] = PLEX_TYPE[type];
+
+        const path = section_id ? `/library/sections/${section_id}/search` : "/search";
+        const data = await client.get<PlexMediaContainer<{ Metadata?: MediaItem[] }>>(path, params);
         const items = data.MediaContainer.Metadata ?? [];
         if (items.length === 0)
           return { content: [{ type: "text", text: `No results found for "${query}".` }] };

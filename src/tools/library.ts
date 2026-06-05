@@ -33,6 +33,7 @@ interface MediaItem {
   contentRating?: unknown;
   viewCount?: unknown;
   viewOffset?: unknown;
+  addedAt?: unknown;
   Media?: PlexMedia[];
 }
 
@@ -93,6 +94,26 @@ function msToTime(ms: number): string {
   return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
 }
 
+function formatDate(epoch: number): string {
+  return new Date(epoch * 1000).toISOString().slice(0, 10);
+}
+
+// Parse a date/time value for addedAt filters.
+// Accepts relative shorthands (24h, 7d, 30d), ISO 8601 dates, or Unix timestamp strings.
+// Returns a Unix timestamp in seconds, or undefined if the input is invalid.
+function parseRelativeDate(val: string): number | undefined {
+  const rel = val.match(/^(\d+)([hd])$/);
+  if (rel) {
+    const n = parseInt(rel[1], 10);
+    const unit = rel[2];
+    const ms = unit === "h" ? n * 3_600_000 : n * 86_400_000;
+    return Math.floor((Date.now() - ms) / 1000);
+  }
+  const d = new Date(val);
+  if (!isNaN(d.getTime())) return Math.floor(d.getTime() / 1000);
+  return undefined;
+}
+
 function matchesResolutionFilter(videoResolution: unknown, filter: string): boolean {
   const r = String(videoResolution ?? "").toLowerCase();
   switch (filter) {
@@ -135,7 +156,8 @@ function formatItem(m: MediaItem): string {
   if (part?.size) quality.push(formatFileSize(Number(part.size)));
 
   const qualitySuffix = quality.length > 0 ? ` | ${quality.join(" | ")}` : "";
-  return `[${key}] ${prefix}${title}${year} [${type}]${qualitySuffix}`;
+  const addedSuffix = m.addedAt ? ` | Added: ${formatDate(Number(m.addedAt))}` : "";
+  return `[${key}] ${prefix}${title}${year} [${type}]${qualitySuffix}${addedSuffix}`;
 }
 
 function formatDetail(m: MediaItem): string {
@@ -235,6 +257,18 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
         .min(1)
         .optional()
         .describe("Filter to items with bitrate at or above this threshold (kbps)"),
+      added_after: z
+        .string()
+        .optional()
+        .describe(
+          "Return items added after this time. Accepts ISO 8601 date (2026-06-01) or relative shorthand (24h, 7d, 30d)."
+        ),
+      added_before: z
+        .string()
+        .optional()
+        .describe(
+          "Return items added before this time. Accepts ISO 8601 date or relative shorthand. Combine with added_after for a date range."
+        ),
     },
     async ({
       section_id,
@@ -248,6 +282,8 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
       sort,
       resolution,
       min_bitrate,
+      added_after,
+      added_before,
     }) => {
       try {
         const params: Record<string, string> = {
@@ -260,6 +296,14 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
         if (content_rating) params["contentRating"] = content_rating;
         if (studio) params["studio"] = studio;
         if (sort) params["sort"] = sort;
+        if (added_after !== undefined) {
+          const ts = parseRelativeDate(added_after);
+          if (ts !== undefined) params["addedAt>>"] = String(ts);
+        }
+        if (added_before !== undefined) {
+          const ts = parseRelativeDate(added_before);
+          if (ts !== undefined) params["addedAt<<"] = String(ts);
+        }
 
         const data = await client.get<
           PlexMediaContainer<{ totalSize?: number; Metadata?: MediaItem[] }>

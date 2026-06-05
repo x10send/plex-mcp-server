@@ -150,6 +150,22 @@ describe("schedule_recording", () => {
     assert.match(text, /Ends:/);
   });
 
+  it("schedules a recording without program_title (title is optional)", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", channel_id: "ch-tnt" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /Recording scheduled/);
+  });
+
   it("handles response with no subscription object", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
@@ -159,7 +175,7 @@ describe("schedule_recording", () => {
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", program_title: "No Show" },
+      { program_id: "1001" },
       client
     );
     assert.equal(isError, false);
@@ -244,7 +260,7 @@ describe("schedule_recording", () => {
     assert.match(text, /422/);
   });
 
-  it("sends hints[ratingKey], hints[guid], hints[title], and params[airingChannels] as POST params", async () => {
+  it("sends hints[ratingKey], hints[guid], and params[airingChannels] as POST params", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
@@ -261,6 +277,17 @@ describe("schedule_recording", () => {
     assert.equal(params?.["hints[guid]"], "plex://episode/abc");
     assert.equal(params?.["hints[title]"], "My Show");
     assert.equal(params?.["params[airingChannels]"], "ch-tnt");
+  });
+
+  it("omits hints[title] when program_title is not provided", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(register, "schedule_recording", { program_id: "1001" }, client);
+    const params = client.getLastPostParams();
+    assert.equal(params?.["hints[title]"], undefined);
   });
 
   it("converts offset seconds to minutes (ceiling) in POST params", async () => {
@@ -431,12 +458,7 @@ describe("dvr formatting edge cases", () => {
         MediaSubscription: [{ id: "7", title: "Sparse" }],
       },
     });
-    const { text } = await callTool(
-      register,
-      "schedule_recording",
-      { program_id: "5", program_title: "Sparse" },
-      client
-    );
+    const { text } = await callTool(register, "schedule_recording", { program_id: "5" }, client);
     assert.doesNotMatch(text, /Starts:/);
     assert.doesNotMatch(text, /Ends:/);
   });

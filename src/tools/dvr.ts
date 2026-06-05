@@ -135,8 +135,9 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         .string()
         .min(1)
         .max(500)
+        .optional()
         .describe(
-          "program_title from get_live_tv_guide — required for Plex to display and link the recording correctly"
+          "program_title from get_live_tv_guide — helps Plex display and link the recording correctly. Recommended but not required."
         ),
       program_type: z
         .enum(["movie", "episode"])
@@ -232,8 +233,8 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           "hints[type]": contentType,
           "hints[ratingKey]": args.program_id,
           "hints[guid]": programGuid,
-          "hints[title]": args.program_title,
         };
+        if (args.program_title) params["hints[title]"] = args.program_title;
         if (sectionId !== undefined) params["targetLibrarySectionID"] = String(sectionId);
         if (args.channel_id) params["params[airingChannels]"] = args.channel_id;
 
