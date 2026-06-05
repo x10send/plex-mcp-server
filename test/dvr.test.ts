@@ -365,26 +365,12 @@ describe("schedule_recording", () => {
     assert.equal(params?.["targetLibrarySectionID"], undefined);
   });
 
-  it("includes params[dvr] in POST params when /livetv/dvrs returns a device", async () => {
-    const client = makeMockClient();
-    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
-    client.setResponse("/livetv/dvrs", {
-      MediaContainer: { Device: [{ id: 7 }] },
-    });
-    client.setResponse(SUBS_PATH, {
-      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
-    });
-    await callTool(register, "schedule_recording", { program_id: "1001" }, client);
-    const params = client.getLastPostParams();
-    assert.equal(params?.["params[dvr]"], "7");
-  });
-
-  it("sets targetSectionLocationID from DVR device location", async () => {
+  it("sets params[deviceID], params[dvrDeviceID], targetSectionLocationID from /livetv/dvrs", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse("/livetv/dvrs", {
       MediaContainer: {
-        Device: [{ id: 7, MediaContainer: { Location: [{ id: 12 }] } }],
+        Dvr: [{ key: "2", Device: [{ deviceId: "105838FF", key: "1" }] }],
       },
     });
     client.setResponse(SUBS_PATH, {
@@ -392,10 +378,12 @@ describe("schedule_recording", () => {
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
     const params = client.getLastPostParams();
-    assert.equal(params?.["targetSectionLocationID"], "12");
+    assert.equal(params?.["targetSectionLocationID"], "2");
+    assert.equal(params?.["params[deviceID]"], "105838FF");
+    assert.equal(params?.["params[dvrDeviceID]"], "1");
   });
 
-  it("omits params[dvr] and targetSectionLocationID when /livetv/dvrs fetch fails", async () => {
+  it("omits DVR params when /livetv/dvrs fetch fails", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     // No /livetv/dvrs mock → throws silently
@@ -404,8 +392,9 @@ describe("schedule_recording", () => {
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
     const params = client.getLastPostParams();
-    assert.equal(params?.["params[dvr]"], undefined);
     assert.equal(params?.["targetSectionLocationID"], undefined);
+    assert.equal(params?.["params[deviceID]"], undefined);
+    assert.equal(params?.["params[dvrDeviceID]"], undefined);
   });
 
   it("debug=true shows POST params in output on success", async () => {

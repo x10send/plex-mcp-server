@@ -39,16 +39,19 @@ interface TemplateResponse {
   };
 }
 
-interface DvrDevice {
-  id?: unknown;
-  deviceid?: unknown;
-  MediaContainer?: {
-    Location?: Array<{ id?: unknown }>;
-  };
+interface DvrHwDevice {
+  deviceId?: unknown;
+  key?: unknown;
+  uuid?: unknown;
+}
+
+interface Dvr {
+  key?: unknown;
+  Device?: DvrHwDevice[];
 }
 
 interface DvrDevicesResponse {
-  MediaContainer: { Device?: DvrDevice[] };
+  MediaContainer: { Dvr?: Dvr[] };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -236,16 +239,21 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         const endMin =
           args.end_offset_seconds !== undefined ? Math.ceil(args.end_offset_seconds / 60) : 5;
 
-        // 6. Fetch DVR device info: device ID and section location ID.
+        // 6. Fetch DVR device info from /livetv/dvrs.
+        //    Structure: MediaContainer.Dvr[0].key = section location ID
+        //               MediaContainer.Dvr[0].Device[0].deviceId = hardware device ID
+        //               MediaContainer.Dvr[0].Device[0].key = DVR device key
         let dvrDeviceId: string | undefined;
+        let dvrDeviceKey: string | undefined;
         let dvrSectionLocationId: string | undefined;
         let dvrRaw: string | undefined;
         try {
           const dvrs = await client.get<DvrDevicesResponse>("/livetv/dvrs");
-          const device = dvrs.MediaContainer?.Device?.[0];
-          if (device?.id != null) dvrDeviceId = String(device.id);
-          const location = device?.MediaContainer?.Location?.[0];
-          if (location?.id != null) dvrSectionLocationId = String(location.id);
+          const dvr = dvrs.MediaContainer?.Dvr?.[0];
+          if (dvr?.key != null) dvrSectionLocationId = String(dvr.key);
+          const device = dvr?.Device?.[0];
+          if (device?.deviceId != null) dvrDeviceId = String(device.deviceId);
+          if (device?.key != null) dvrDeviceKey = String(device.key);
           if (args.debug) dvrRaw = JSON.stringify(dvrs.MediaContainer, null, 2).slice(0, 1500);
         } catch {
           // Continue without DVR device info.
@@ -268,9 +276,10 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         };
         if (args.program_title) params["hints[title]"] = args.program_title;
         if (args.channel_id) params["params[airingChannels]"] = args.channel_id;
-        if (dvrDeviceId !== undefined) params["params[dvr]"] = dvrDeviceId;
         if (dvrSectionLocationId !== undefined)
           params["targetSectionLocationID"] = dvrSectionLocationId;
+        if (dvrDeviceId !== undefined) params["params[deviceID]"] = dvrDeviceId;
+        if (dvrDeviceKey !== undefined) params["params[dvrDeviceID]"] = dvrDeviceKey;
         if (sectionId !== undefined) params["targetLibrarySectionID"] = String(sectionId);
 
         // 8. Collect debug info if requested.
@@ -279,8 +288,9 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           debugLines.push("=== DEBUG: schedule_recording ===");
           debugLines.push(`providerId: ${providerId}`);
           debugLines.push(`sectionId: ${sectionId ?? "not found"}`);
-          debugLines.push(`dvrDeviceId: ${dvrDeviceId ?? "not found"}`);
           debugLines.push(`dvrSectionLocationId: ${dvrSectionLocationId ?? "not found"}`);
+          debugLines.push(`dvrDeviceId: ${dvrDeviceId ?? "not found"}`);
+          debugLines.push(`dvrDeviceKey: ${dvrDeviceKey ?? "not found"}`);
           if (dvrRaw) debugLines.push(`/livetv/dvrs response:\n${dvrRaw}`);
           debugLines.push("POST params:");
           for (const [k, v] of Object.entries(params)) {
