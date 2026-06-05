@@ -221,7 +221,7 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
           "Filter by genre — case-insensitive substring match (e.g. 'adventure', 'action')"
         ),
       debug: z
-        .boolean()
+        .union([z.boolean(), z.string().transform((v) => v === "true")])
         .optional()
         .describe(
           "Return raw diagnostic data (provider list, exact params, raw guide response) instead of formatted programs. Use when the guide returns empty results to diagnose what Plex is sending back."

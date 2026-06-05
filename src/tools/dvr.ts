@@ -176,7 +176,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           "Keep recording this many seconds past the end time (0–3600, rounded up to minutes). Default 5 minutes."
         ),
       debug: z
-        .boolean()
+        .union([z.boolean(), z.string().transform((v) => v === "true")])
         .optional()
         .describe(
           "Show all POST params and the full Plex error response. Use this to diagnose 400 errors."
