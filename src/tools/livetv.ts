@@ -197,32 +197,13 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
           return { content: [{ type: "text", text: NOT_CONFIGURED }] };
         }
 
-        const epgProvider = (providers.MediaContainer?.MediaProvider ?? []).find((p) =>
+        const epgProviders = (providers.MediaContainer?.MediaProvider ?? []).filter((p) =>
           String(p.identifier ?? "").includes("epg")
         );
 
-        if (!epgProvider) {
+        if (epgProviders.length === 0) {
           return { content: [{ type: "text", text: NOT_CONFIGURED }] };
         }
-
-        // Plex cloud EPG uses type "grid" with gridStart/gridEnd params.
-        // Older/local EPG may use type "guide". "content" and "items" features
-        // lead to section-list endpoints, not guide data — skip them.
-        const guideFeature = (epgProvider.Feature ?? []).find(
-          (f) =>
-            String(f.type ?? "").toLowerCase() === "grid" ||
-            String(f.key ?? "")
-              .toLowerCase()
-              .includes("/grid") ||
-            String(f.type ?? "")
-              .toLowerCase()
-              .includes("guide") ||
-            String(f.key ?? "")
-              .toLowerCase()
-              .includes("guide")
-        );
-        const providerId = String(epgProvider.identifier ?? "tv.plex.provider.epg");
-        const guidePath = guideFeature?.key ? String(guideFeature.key) : `/${providerId}/grid`;
 
         // Plex type codes: 1 = movie, 4 = episode
         const params: Record<string, string> = {
@@ -233,29 +214,60 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
         if (args.type === "movie") params.type = "1";
         else if (args.type === "episode") params.type = "4";
 
-        let guide: GuideResponse;
-        try {
-          guide = await client.get<GuideResponse>(guidePath, params);
-        } catch (guideErr) {
-          if (guideErr instanceof PlexApiError && guideErr.status === 404) {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text:
-                    `Live TV guide returned 404 on path "${guidePath}". ` +
-                    `EPG provider: ${providerId}. ` +
-                    `Feature key used: ${guideFeature?.key ?? "none (used fallback)"}. ` +
-                    `Run: curl -s -H "X-Plex-Token: YOUR_TOKEN" ` +
-                    `http://YOUR_PLEX_URL/media/providers to inspect available guide paths.`,
-                },
-              ],
-              isError: true,
-            };
+        let programs: EpgProgram[] = [];
+        const triedPaths: string[] = [];
+        let anySucceeded = false;
+
+        for (const epgProvider of epgProviders) {
+          // Plex cloud EPG uses type "grid" with gridStart/gridEnd params.
+          // Older/local EPG may use type "guide". "content" and "items" features
+          // lead to section-list endpoints, not guide data — skip them.
+          const guideFeature = (epgProvider.Feature ?? []).find(
+            (f) =>
+              String(f.type ?? "").toLowerCase() === "grid" ||
+              String(f.key ?? "")
+                .toLowerCase()
+                .includes("/grid") ||
+              String(f.type ?? "")
+                .toLowerCase()
+                .includes("guide") ||
+              String(f.key ?? "")
+                .toLowerCase()
+                .includes("guide")
+          );
+          const providerId = String(epgProvider.identifier ?? "tv.plex.provider.epg");
+          const guidePath = guideFeature?.key ? String(guideFeature.key) : `/${providerId}/grid`;
+          triedPaths.push(guidePath);
+
+          try {
+            const guide = await client.get<GuideResponse>(guidePath, params);
+            anySucceeded = true;
+            const results = guide.MediaContainer?.Metadata ?? [];
+            if (results.length > 0) {
+              programs = results;
+              break;
+            }
+          } catch (guideErr) {
+            if (guideErr instanceof PlexApiError && guideErr.status === 404) continue;
+            return toolError(guideErr);
           }
-          return toolError(guideErr);
         }
-        let programs = guide.MediaContainer?.Metadata ?? [];
+
+        if (!anySucceeded) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `Live TV guide returned 404 on all EPG provider paths. ` +
+                  `Tried: ${triedPaths.join(", ")}. ` +
+                  `Run: curl -s -H "X-Plex-Token: YOUR_TOKEN" ` +
+                  `http://YOUR_PLEX_URL/media/providers to inspect available guide paths.`,
+              },
+            ],
+            isError: true,
+          };
+        }
 
         // Client-side filters (Plex may not support all server-side)
         if (args.query) {
@@ -285,7 +297,7 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
                 text:
                   "No programs found matching your criteria in the requested time window.\n" +
                   `Searched: ${formatTime(startMs)} → ${formatTime(endMs)}\n` +
-                  `Guide path: ${guidePath}\n` +
+                  `Guide paths tried: ${triedPaths.join(", ")}\n` +
                   "If the guide appears empty, try refreshing EPG data in Plex (Settings → Live TV & DVR → Refresh Guide Data).",
               },
             ],

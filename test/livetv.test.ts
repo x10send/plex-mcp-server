@@ -356,4 +356,81 @@ describe("get_live_tv_guide", () => {
     assert.equal(isError, false);
     assert.match(text, /No Schedule/);
   });
+
+  it("tries second provider when first returns 404", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", {
+      MediaContainer: {
+        MediaProvider: [
+          {
+            identifier: "tv.plex.provider.epg.1",
+            Feature: [{ key: "/tv.plex.provider.epg.1/grid", type: "grid" }],
+          },
+          {
+            identifier: "tv.plex.provider.epg.2",
+            Feature: [{ key: "/tv.plex.provider.epg.2/grid", type: "grid" }],
+          },
+        ],
+      },
+    });
+    client.setError("/tv.plex.provider.epg.1/grid", 404, "Not found");
+    client.setResponse("/tv.plex.provider.epg.2/grid", {
+      MediaContainer: { Metadata: [makeProgram()] },
+    });
+    const { text, isError } = await callTool(register, "get_live_tv_guide", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /National Treasure/);
+  });
+
+  it("tries next provider when first returns empty", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", {
+      MediaContainer: {
+        MediaProvider: [
+          {
+            identifier: "tv.plex.provider.epg.1",
+            Feature: [{ key: "/tv.plex.provider.epg.1/grid", type: "grid" }],
+          },
+          {
+            identifier: "tv.plex.provider.epg.2",
+            Feature: [{ key: "/tv.plex.provider.epg.2/grid", type: "grid" }],
+          },
+        ],
+      },
+    });
+    client.setResponse("/tv.plex.provider.epg.1/grid", {
+      MediaContainer: { Metadata: [] },
+    });
+    client.setResponse("/tv.plex.provider.epg.2/grid", {
+      MediaContainer: { Metadata: [makeProgram()] },
+    });
+    const { text, isError } = await callTool(register, "get_live_tv_guide", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /National Treasure/);
+  });
+
+  it("returns diagnostic error when all EPG providers return 404", async () => {
+    const client = makeMockClient();
+    client.setResponse("/media/providers", {
+      MediaContainer: {
+        MediaProvider: [
+          {
+            identifier: "tv.plex.provider.epg.1",
+            Feature: [{ key: "/tv.plex.provider.epg.1/grid", type: "grid" }],
+          },
+          {
+            identifier: "tv.plex.provider.epg.2",
+            Feature: [{ key: "/tv.plex.provider.epg.2/grid", type: "grid" }],
+          },
+        ],
+      },
+    });
+    client.setError("/tv.plex.provider.epg.1/grid", 404, "Not found");
+    client.setError("/tv.plex.provider.epg.2/grid", 404, "Not found");
+    const { isError, text } = await callTool(register, "get_live_tv_guide", {}, client);
+    assert.equal(isError, true);
+    assert.match(text, /404/);
+    assert.match(text, /tv\.plex\.provider\.epg\.1/);
+    assert.match(text, /tv\.plex\.provider\.epg\.2/);
+  });
 });
