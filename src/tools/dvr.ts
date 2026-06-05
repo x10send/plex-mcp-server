@@ -155,9 +155,11 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           "program_title from get_live_tv_guide — helps Plex display and link the recording correctly. Recommended but not required."
         ),
       program_type: z
-        .enum(["movie", "episode"])
+        .enum(["movie", "episode", "show"])
         .optional()
-        .describe("program_type from get_live_tv_guide. Default: movie."),
+        .describe(
+          "program_type from get_live_tv_guide. Use 'show' to create a season pass. Default: movie."
+        ),
       channel_id: z
         .string()
         .min(1)
@@ -230,8 +232,13 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           // Continue without section ID.
         }
 
-        // 4. Map content type: movie=1, episode=4.
-        const contentType = args.program_type === "episode" ? "4" : "1";
+        // 4. Map content type: movie=1, show=2, episode=4.
+        //    libraryType mirrors Plex library section type: movies=1, TV=2.
+        //    oneShot=false creates a season pass for shows; true for one-off recordings.
+        const contentType =
+          args.program_type === "episode" ? "4" : args.program_type === "show" ? "2" : "1";
+        const libraryType = args.program_type === "movie" ? "1" : "2";
+        const oneShot = args.program_type === "show" ? "false" : "true";
 
         // 5. Convert second-based offsets to minutes (Plex API uses minutes).
         const startMin =
@@ -262,25 +269,37 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         // 7. Build the POST params.
         const params: Record<string, string> = {
           type: contentType,
+          targetSectionLocationID: "",
           includeGrabs: "1",
           "params[mediaProviderID]": String(providerId),
-          "params[libraryType]": contentType,
-          "prefs[oneShot]": "true",
-          "prefs[recordPartials]": "false",
+          "params[libraryType]": libraryType,
+          "prefs[onlyNewAirings]": "1",
+          "prefs[minVideoQuality]": "0",
+          "prefs[replaceLowerQuality]": "false",
+          "prefs[recordPartials]": "true",
           "prefs[startOffsetMinutes]": String(startMin),
           "prefs[endOffsetMinutes]": String(endMin),
+          "prefs[lineupChannel]": "",
+          "prefs[startTimeslot]": "-1",
+          "prefs[comskipEnabled]": "-1",
+          "prefs[comskipMethod]": "1",
+          "prefs[oneShot]": oneShot,
           "prefs[remoteMedia]": "false",
+          "prefs[autoDeletionItemPolicyUnwatchedLibrary]": "0",
+          "prefs[autoDeletionItemPolicyWatchedLibrary]": "0",
           "hints[type]": contentType,
-          "hints[ratingKey]": programGuid,
+          "hints[ratingKey]": args.program_id,
           "hints[guid]": programGuid,
         };
         if (args.program_title) params["hints[title]"] = args.program_title;
         if (args.channel_id) params["params[airingChannels]"] = args.channel_id;
-        if (dvrSectionLocationId !== undefined)
-          params["targetSectionLocationID"] = dvrSectionLocationId;
+        if (sectionId !== undefined) {
+          params["targetLibrarySectionID"] = String(sectionId);
+        } else if (dvrSectionLocationId !== undefined) {
+          params["targetLibrarySectionID"] = dvrSectionLocationId;
+        }
         if (dvrDeviceId !== undefined) params["params[deviceID]"] = dvrDeviceId;
         if (dvrDeviceKey !== undefined) params["params[dvrDeviceID]"] = dvrDeviceKey;
-        if (sectionId !== undefined) params["targetLibrarySectionID"] = String(sectionId);
 
         // 8. Collect debug info if requested.
         const debugLines: string[] = [];

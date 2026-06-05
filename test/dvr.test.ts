@@ -273,7 +273,7 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["hints[ratingKey]"], "plex://episode/abc");
+    assert.equal(params?.["hints[ratingKey]"], "plex%3A%2F%2Fepisode%2Fabc");
     assert.equal(params?.["hints[guid]"], "plex://episode/abc");
     assert.equal(params?.["hints[title]"], "My Show");
     assert.equal(params?.["params[airingChannels]"], "ch-tnt");
@@ -378,7 +378,8 @@ describe("schedule_recording", () => {
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
     const params = client.getLastPostParams();
-    assert.equal(params?.["targetSectionLocationID"], "2");
+    assert.equal(params?.["targetSectionLocationID"], "");
+    assert.equal(params?.["targetLibrarySectionID"], "2");
     assert.equal(params?.["params[deviceID]"], "105838FF");
     assert.equal(params?.["params[dvrDeviceID]"], "1");
   });
@@ -392,7 +393,7 @@ describe("schedule_recording", () => {
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
     const params = client.getLastPostParams();
-    assert.equal(params?.["targetSectionLocationID"], undefined);
+    assert.equal(params?.["targetSectionLocationID"], "");
     assert.equal(params?.["params[deviceID]"], undefined);
     assert.equal(params?.["params[dvrDeviceID]"], undefined);
   });
@@ -432,6 +433,25 @@ describe("schedule_recording", () => {
     assert.match(text, /hints\[ratingKey\]/);
   });
 
+  it("uses show content type (2) and oneShot=false for program_type=show", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "3001", program_title: "Highlander", program_type: "show" },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.["type"], "2");
+    assert.equal(params?.["hints[type]"], "2");
+    assert.equal(params?.["params[libraryType]"], "2");
+    assert.equal(params?.["prefs[oneShot]"], "false");
+  });
+
   it("uses episode content type (4) for program_type=episode", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
@@ -447,7 +467,7 @@ describe("schedule_recording", () => {
     const params = client.getLastPostParams();
     assert.equal(params?.["type"], "4");
     assert.equal(params?.["hints[type]"], "4");
-    assert.equal(params?.["params[libraryType]"], "4");
+    assert.equal(params?.["params[libraryType]"], "2");
   });
 });
 
