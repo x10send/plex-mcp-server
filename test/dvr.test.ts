@@ -112,16 +112,33 @@ describe("get_scheduled_recordings", () => {
 
 // ── schedule_recording ────────────────────────────────────────────────────────
 
+const PROVIDERS_PATH = "/media/providers";
+const TEMPLATE_PATH = "/media/subscriptions/template";
+
+const EPG_PROVIDERS = {
+  MediaContainer: {
+    MediaProvider: [{ identifier: "tv.plex.providers.epg.cloud", id: 10 }],
+  },
+};
+
+const SUBSCRIPTION_TEMPLATE = {
+  MediaContainer: {
+    SubscriptionTemplate: [{ MediaSubscription: [{ targetLibrarySectionID: 6 }] }],
+  },
+};
+
 describe("schedule_recording", () => {
   it("schedules a recording and returns subscription details", async () => {
     const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(TEMPLATE_PATH, SUBSCRIPTION_TEMPLATE);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", channel_id: "ch-tnt" },
+      { program_id: "1001", program_title: "National Treasure", channel_id: "ch-tnt" },
       client
     );
     assert.equal(isError, false);
@@ -135,13 +152,14 @@ describe("schedule_recording", () => {
 
   it("handles response with no subscription object", async () => {
     const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [] },
     });
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", channel_id: "ch-tnt" },
+      { program_id: "1001", program_title: "No Show" },
       client
     );
     assert.equal(isError, false);
@@ -150,6 +168,7 @@ describe("schedule_recording", () => {
 
   it("accepts optional start and end offset parameters", async () => {
     const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
       MediaContainer: {
         MediaSubscription: [{ id: "99", title: "Show", channelTitle: "NBC" }],
@@ -160,6 +179,7 @@ describe("schedule_recording", () => {
       "schedule_recording",
       {
         program_id: "2002",
+        program_title: "Show",
         channel_id: "ch-nbc",
         start_offset_seconds: 30,
         end_offset_seconds: 120,
@@ -170,13 +190,40 @@ describe("schedule_recording", () => {
     assert.match(text, /Subscription ID: 99/);
   });
 
-  it("returns not-configured message when /media/subscriptions returns 404", async () => {
+  it("returns not-configured message when /media/providers returns 404", async () => {
     const client = makeMockClient();
+    client.setError(PROVIDERS_PATH, 404, "Not found");
+    const { text, isError } = await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", program_title: "Movie" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /not configured/i);
+  });
+
+  it("returns not-configured message when no EPG provider in providers response", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, { MediaContainer: { MediaProvider: [] } });
+    const { text, isError } = await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", program_title: "Movie" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /not configured/i);
+  });
+
+  it("returns not-configured message when /media/subscriptions POST returns 404", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setError(SUBS_PATH, 404, "Not found");
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", channel_id: "ch-tnt" },
+      { program_id: "1001", program_title: "Movie", channel_id: "ch-tnt" },
       client
     );
     assert.equal(isError, false);
@@ -185,35 +232,40 @@ describe("schedule_recording", () => {
 
   it("returns error on API failure (non-404)", async () => {
     const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setError(SUBS_PATH, 422, "Invalid program");
     const { isError, text } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "bad", channel_id: "ch-tnt" },
+      { program_id: "bad", program_title: "Bad Program", channel_id: "ch-tnt" },
       client
     );
     assert.equal(isError, true);
     assert.match(text, /422/);
   });
 
-  it("sends programKey and channelKey as POST params", async () => {
+  it("sends hints[ratingKey], hints[guid], hints[title], and params[airingChannels] as POST params", async () => {
     const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
     await callTool(
       register,
       "schedule_recording",
-      { program_id: "plex%3A%2F%2Fepisode%2Fabc", channel_id: "ch-tnt" },
+      { program_id: "plex%3A%2F%2Fepisode%2Fabc", program_title: "My Show", channel_id: "ch-tnt" },
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.programKey, "plex%3A%2F%2Fepisode%2Fabc");
-    assert.equal(params?.channelKey, "ch-tnt");
+    assert.equal(params?.["hints[ratingKey]"], "plex%3A%2F%2Fepisode%2Fabc");
+    assert.equal(params?.["hints[guid]"], "plex://episode/abc");
+    assert.equal(params?.["hints[title]"], "My Show");
+    assert.equal(params?.["params[airingChannels]"], "ch-tnt");
   });
 
-  it("sends negative startTimeOffset for pre-roll seconds", async () => {
+  it("converts offset seconds to minutes (ceiling) in POST params", async () => {
     const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
@@ -222,6 +274,7 @@ describe("schedule_recording", () => {
       "schedule_recording",
       {
         program_id: "plex%3A%2F%2Fepisode%2Fabc",
+        program_title: "My Show",
         channel_id: "ch-tnt",
         start_offset_seconds: 30,
         end_offset_seconds: 120,
@@ -229,8 +282,79 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.startTimeOffset, "-30");
-    assert.equal(params?.endTimeOffset, "120");
+    assert.equal(params?.["prefs[startOffsetMinutes]"], "1");
+    assert.equal(params?.["prefs[endOffsetMinutes]"], "2");
+  });
+
+  it("defaults end offset to 5 minutes when not specified", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", program_title: "Movie" },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.["prefs[startOffsetMinutes]"], "0");
+    assert.equal(params?.["prefs[endOffsetMinutes]"], "5");
+  });
+
+  it("includes targetLibrarySectionID from template when available", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(TEMPLATE_PATH, SUBSCRIPTION_TEMPLATE);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", program_title: "Movie" },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.["targetLibrarySectionID"], "6");
+    assert.equal(params?.["targetSectionLocationID"], "10");
+    assert.equal(params?.["params[mediaProviderID]"], "10");
+  });
+
+  it("omits targetLibrarySectionID when template fetch fails", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    // No template mock → mock throws "no response configured" → caught silently
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", program_title: "Movie" },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.["targetLibrarySectionID"], undefined);
+  });
+
+  it("uses episode content type (4) for program_type=episode", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "2001", program_title: "Breaking Bad", program_type: "episode" },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.["type"], "4");
+    assert.equal(params?.["hints[type]"], "4");
+    assert.equal(params?.["params[libraryType]"], "4");
   });
 });
 
@@ -301,6 +425,7 @@ describe("dvr formatting edge cases", () => {
 
   it("schedule_recording: subscription missing startTime/endTime omits those lines", async () => {
     const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
       MediaContainer: {
         MediaSubscription: [{ id: "7", title: "Sparse" }],
@@ -309,7 +434,7 @@ describe("dvr formatting edge cases", () => {
     const { text } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "5", channel_id: "ch-x" },
+      { program_id: "5", program_title: "Sparse" },
       client
     );
     assert.doesNotMatch(text, /Starts:/);

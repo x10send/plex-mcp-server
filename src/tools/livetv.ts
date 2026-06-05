@@ -135,10 +135,15 @@ function formatProgram(p: EpgProgram): string {
   const genreStr = genres ? ` | ${genres}` : "";
   const progId = String(p.ratingKey ?? p.key ?? "?");
   const timeStr = `${formatTimeShort(startsMs)} – ${formatTimeShort(endsMs)}`;
+  // For scheduling: use the show name for episodes (grandparentTitle), movie title for movies.
+  const recordTitle = showName ?? epTitle;
+  const progType = String(p.type ?? "movie");
 
   return (
     `  ${timeStr}  ${displayTitle}${year}${durMin}${cr}${rating}${genreStr}\n` +
-    `    program_id: ${progId}`
+    `    program_id: ${progId}\n` +
+    `    program_title: ${recordTitle}\n` +
+    `    program_type: ${progType}`
   );
 }
 

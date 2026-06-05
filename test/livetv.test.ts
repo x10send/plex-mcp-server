@@ -89,6 +89,8 @@ describe("get_live_tv_guide", () => {
     assert.match(text, /PG/);
     assert.match(text, /Adventure/);
     assert.match(text, /program_id: 1001/);
+    assert.match(text, /program_title: National Treasure/);
+    assert.match(text, /program_type: movie/);
   });
 
   it("returns not-configured message when no EPG provider", async () => {
@@ -201,6 +203,8 @@ describe("get_live_tv_guide", () => {
     assert.match(text, /Breaking Bad S1E1: Pilot/);
     assert.match(text, /AMC/);
     assert.match(text, /program_id: 2001/);
+    assert.match(text, /program_title: Breaking Bad/);
+    assert.match(text, /program_type: episode/);
   });
 
   it("filters by query (title match)", async () => {

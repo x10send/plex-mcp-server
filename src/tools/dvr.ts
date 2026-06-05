@@ -22,6 +22,23 @@ interface SubscriptionsResponse {
   MediaContainer: { MediaSubscription?: unknown };
 }
 
+interface EpgProvider {
+  identifier?: unknown;
+  id?: unknown;
+}
+
+interface DvrProvidersResponse {
+  MediaContainer: { MediaProvider?: EpgProvider[] };
+}
+
+interface TemplateResponse {
+  MediaContainer?: {
+    SubscriptionTemplate?: Array<{
+      MediaSubscription?: Array<{ targetLibrarySectionID?: unknown }>;
+    }>;
+  };
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 const SUBSCRIPTIONS_PATH = "/media/subscriptions";
@@ -46,6 +63,21 @@ function formatSubscription(s: DvrSubscription): string {
   const padStart = s.startTimeOffset ? `\n  Pre-roll: ${Math.abs(Number(s.startTimeOffset))}s` : "";
   const padEnd = s.endTimeOffset ? `\n  Post-roll: ${s.endTimeOffset}s` : "";
   return `[${id}] ${title}${type}${channel}${timeRange}${status}${padStart}${padEnd}`;
+}
+
+// Repeatedly URL-decode until stable — EPG ratingKeys may be multiply encoded.
+function fullyDecode(s: string): string {
+  let prev = "";
+  let curr = s;
+  while (prev !== curr) {
+    prev = curr;
+    try {
+      curr = decodeURIComponent(curr);
+    } catch {
+      break;
+    }
+  }
+  return curr;
 }
 
 // Plex may return MediaSubscription as an array or a bare object (single item).
@@ -88,48 +120,124 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
 
   server.tool(
     "schedule_recording",
-    "Schedule a DVR recording for a specific program. Use get_live_tv_guide to find the program_id and channel_id, then call this tool to record it. Returns a subscription ID you can use with cancel_recording.",
+    [
+      "Schedule a one-shot DVR recording for a specific program.",
+      "Use get_live_tv_guide to obtain program_id, program_title, program_type, and channel_id, then pass them here.",
+      "Returns a subscription ID you can use with cancel_recording.",
+    ].join(" "),
     {
       program_id: z
         .string()
         .min(1)
         .max(500)
-        .describe(
-          "Program ID from get_live_tv_guide (the program_id value shown under each program)"
-        ),
-      channel_id: z
+        .describe("program_id from get_live_tv_guide (shown under each program)"),
+      program_title: z
         .string()
         .min(1)
         .max(500)
         .describe(
-          "Channel ID from get_live_tv_guide (the channel_id value shown in the channel header)"
+          "program_title from get_live_tv_guide — required for Plex to display and link the recording correctly"
         ),
+      program_type: z
+        .enum(["movie", "episode"])
+        .optional()
+        .describe("program_type from get_live_tv_guide. Default: movie."),
+      channel_id: z
+        .string()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe("channel_id from get_live_tv_guide — improves airing matching"),
       start_offset_seconds: z
         .number()
         .int()
         .min(0)
         .max(600)
         .optional()
-        .describe("Start recording this many seconds early (0–600). Default 0."),
+        .describe(
+          "Start recording this many seconds early (0–600, rounded up to minutes). Default 0."
+        ),
       end_offset_seconds: z
         .number()
         .int()
         .min(0)
         .max(3600)
         .optional()
-        .describe("Keep recording this many seconds past the end time (0–3600). Default 0."),
+        .describe(
+          "Keep recording this many seconds past the end time (0–3600, rounded up to minutes). Default 5 minutes."
+        ),
     },
     async (args) => {
-      const params: Record<string, string> = {
-        programKey: args.program_id,
-        channelKey: args.channel_id,
-      };
-      if (args.start_offset_seconds !== undefined)
-        params.startTimeOffset = String(-args.start_offset_seconds);
-      if (args.end_offset_seconds !== undefined)
-        params.endTimeOffset = String(args.end_offset_seconds);
-
       try {
+        // 1. Fetch EPG provider numeric ID from /media/providers.
+        let providerId: number;
+        try {
+          const providers = await client.get<DvrProvidersResponse>("/media/providers");
+          const epgProvider = (providers.MediaContainer?.MediaProvider ?? []).find((p) =>
+            String(p.identifier ?? "").includes("epg")
+          );
+          if (!epgProvider || epgProvider.id == null) {
+            return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
+          }
+          providerId = Number(epgProvider.id);
+        } catch (err) {
+          if (err instanceof PlexApiError && err.status === 404) {
+            return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
+          }
+          throw err;
+        }
+
+        // 2. Derive GUID by fully URL-decoding the ratingKey.
+        //    EPG ratingKeys are percent-encoded (e.g. plex%3A%2F%2Fepisode%2Fabc).
+        //    Plex expects hints[guid] in decoded form (plex://episode/abc).
+        const programGuid = fullyDecode(args.program_id);
+
+        // 3. Try to get targetLibrarySectionID from the subscription template.
+        //    The template tells us which library the recording will go to.
+        //    Silently skip on failure — the POST may still succeed without it.
+        let sectionId: number | undefined;
+        try {
+          const tmpl = await client.get<TemplateResponse>("/media/subscriptions/template", {
+            guid: programGuid,
+          });
+          const sub = tmpl.MediaContainer?.SubscriptionTemplate?.[0]?.MediaSubscription?.[0];
+          if (sub?.targetLibrarySectionID != null) {
+            sectionId = Number(sub.targetLibrarySectionID);
+          }
+        } catch {
+          // Continue without section ID.
+        }
+
+        // 4. Map content type: movie=1, episode=4.
+        const contentType = args.program_type === "episode" ? "4" : "1";
+
+        // 5. Convert second-based offsets to minutes (Plex API uses minutes).
+        const startMin =
+          args.start_offset_seconds !== undefined ? Math.ceil(args.start_offset_seconds / 60) : 0;
+        const endMin =
+          args.end_offset_seconds !== undefined ? Math.ceil(args.end_offset_seconds / 60) : 5;
+
+        // 6. Build the POST params matching what the Plex UI sends.
+        const params: Record<string, string> = {
+          type: contentType,
+          targetSectionLocationID: String(providerId),
+          includeGrabs: "1",
+          "params[mediaProviderID]": String(providerId),
+          "params[libraryType]": contentType,
+          "prefs[oneShot]": "true",
+          "prefs[recordPartials]": "false",
+          "prefs[startOffsetMinutes]": String(startMin),
+          "prefs[endOffsetMinutes]": String(endMin),
+          "prefs[remoteMedia]": "false",
+          "hints[type]": contentType,
+          "hints[ratingKey]": args.program_id,
+          "hints[guid]": programGuid,
+          "hints[title]": args.program_title,
+        };
+        if (sectionId !== undefined) params["targetLibrarySectionID"] = String(sectionId);
+        if (args.channel_id) params["params[airingChannels]"] = args.channel_id;
+
+        // 7. POST the subscription.
         let data: SubscriptionsResponse;
         try {
           data = await client.post<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
@@ -139,6 +247,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           }
           throw err;
         }
+
         const subs = normaliseSubscriptions(data.MediaContainer?.MediaSubscription);
         const sub = subs[0];
         if (!sub) {
