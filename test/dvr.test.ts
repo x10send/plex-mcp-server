@@ -273,7 +273,7 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["hints[ratingKey]"], "plex%3A%2F%2Fepisode%2Fabc");
+    assert.equal(params?.["hints[ratingKey]"], "plex://episode/abc");
     assert.equal(params?.["hints[guid]"], "plex://episode/abc");
     assert.equal(params?.["hints[title]"], "My Show");
     assert.equal(params?.["params[airingChannels]"], "ch-tnt");
@@ -345,7 +345,6 @@ describe("schedule_recording", () => {
     );
     const params = client.getLastPostParams();
     assert.equal(params?.["targetLibrarySectionID"], "6");
-    assert.equal(params?.["targetSectionLocationID"], "10");
     assert.equal(params?.["params[mediaProviderID]"], "10");
   });
 
@@ -366,21 +365,37 @@ describe("schedule_recording", () => {
     assert.equal(params?.["targetLibrarySectionID"], undefined);
   });
 
-  it("includes deviceID in POST params when /livetv/dvrs returns a device", async () => {
+  it("includes params[dvr] in POST params when /livetv/dvrs returns a device", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse("/livetv/dvrs", {
-      MediaContainer: { Device: [{ deviceid: "AABBCCDDEEFF" }] },
+      MediaContainer: { Device: [{ id: 7 }] },
     });
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
     const params = client.getLastPostParams();
-    assert.equal(params?.["deviceID"], "AABBCCDDEEFF");
+    assert.equal(params?.["params[dvr]"], "7");
   });
 
-  it("omits deviceID when /livetv/dvrs fetch fails", async () => {
+  it("sets targetSectionLocationID from DVR device location", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse("/livetv/dvrs", {
+      MediaContainer: {
+        Device: [{ id: 7, MediaContainer: { Location: [{ id: 12 }] } }],
+      },
+    });
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(register, "schedule_recording", { program_id: "1001" }, client);
+    const params = client.getLastPostParams();
+    assert.equal(params?.["targetSectionLocationID"], "12");
+  });
+
+  it("omits params[dvr] and targetSectionLocationID when /livetv/dvrs fetch fails", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     // No /livetv/dvrs mock → throws silently
@@ -389,7 +404,8 @@ describe("schedule_recording", () => {
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
     const params = client.getLastPostParams();
-    assert.equal(params?.["deviceID"], undefined);
+    assert.equal(params?.["params[dvr]"], undefined);
+    assert.equal(params?.["targetSectionLocationID"], undefined);
   });
 
   it("debug=true shows POST params in output on success", async () => {
