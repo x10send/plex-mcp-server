@@ -136,9 +136,9 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
   server.tool(
     "schedule_recording",
     [
-      "Schedule a one-shot DVR recording for a specific program.",
-      "Use get_live_tv_guide to obtain program_id, program_title, program_type, and channel_id, then pass them here.",
-      "Returns a subscription ID you can use with cancel_recording.",
+      "Schedule a DVR recording for a specific program.",
+      "Use get_live_tv_guide to obtain program_id, program_title, program_type, channel_id, channel_key, and airing_time, then pass them here.",
+      "Use program_type='show' to create a season pass. Returns a subscription ID you can use with cancel_recording.",
     ].join(" "),
     {
       program_id: z
@@ -165,7 +165,22 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         .min(1)
         .max(500)
         .optional()
-        .describe("channel_id from get_live_tv_guide — improves airing matching"),
+        .describe("channel_id from get_live_tv_guide — used for guide filtering"),
+      channel_key: z
+        .string()
+        .min(1)
+        .max(500)
+        .optional()
+        .describe(
+          "channel_key from get_live_tv_guide — sent as params[airingChannels] to help Plex match the airing to the correct channel (e.g. '3.1 KTVKDT (Independent)')"
+        ),
+      airing_time: z
+        .number()
+        .int()
+        .optional()
+        .describe(
+          "airing_time from get_live_tv_guide (Unix seconds) — sent as params[airingTimes] to help Plex match the exact airing slot"
+        ),
       start_offset_seconds: z
         .number()
         .int()
@@ -232,12 +247,11 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           // Continue without section ID.
         }
 
-        // 4. Map content type: movie=1, show=2, episode=4.
-        //    libraryType mirrors Plex library section type: movies=1, TV=2.
-        //    oneShot=false creates a season pass for shows; true for one-off recordings.
-        const contentType =
-          args.program_type === "episode" ? "4" : args.program_type === "show" ? "2" : "1";
-        const libraryType = args.program_type === "movie" ? "1" : "2";
+        // 4. Map subscription type: 2=season pass (show), 1=one-shot (movie or episode).
+        //    The subscriptions API uses 1/2 only — Plex media type 4 (episode) is NOT used here.
+        //    libraryType mirrors subscription type, not Plex library section type.
+        const contentType = args.program_type === "show" ? "2" : "1";
+        const libraryType = args.program_type === "show" ? "2" : "1";
         const oneShot = args.program_type === "show" ? "false" : "true";
 
         // 5. Convert second-based offsets to minutes (Plex API uses minutes).
@@ -288,11 +302,13 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           "prefs[autoDeletionItemPolicyUnwatchedLibrary]": "0",
           "prefs[autoDeletionItemPolicyWatchedLibrary]": "0",
           "hints[type]": contentType,
-          "hints[ratingKey]": args.program_id,
+          "hints[ratingKey]": programGuid,
           "hints[guid]": programGuid,
         };
         if (args.program_title) params["hints[title]"] = args.program_title;
-        if (args.channel_id) params["params[airingChannels]"] = args.channel_id;
+        if (args.channel_key) params["params[airingChannels]"] = `channelKey=${args.channel_key}`;
+        if (args.airing_time !== undefined)
+          params["params[airingTimes]"] = String(args.airing_time);
         if (sectionId !== undefined) {
           params["targetLibrarySectionID"] = String(sectionId);
         } else if (dvrSectionLocationId !== undefined) {

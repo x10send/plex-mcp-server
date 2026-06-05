@@ -143,7 +143,8 @@ function formatProgram(p: EpgProgram): string {
     `  ${timeStr}  ${displayTitle}${year}${durMin}${cr}${rating}${genreStr}\n` +
     `    program_id: ${progId}\n` +
     `    program_title: ${recordTitle}\n` +
-    `    program_type: ${progType}`
+    `    program_type: ${progType}\n` +
+    `    airing_time: ${Math.floor(Number(media.beginsAt))}`
   );
 }
 
@@ -410,7 +411,14 @@ export function registerLiveTvTools(server: McpServer, client: IPlexClient): voi
 
         const body = channels
           .map((ch) => {
-            const chHeader = `📺 ${ch.title} [channel_id: ${ch.id}]`;
+            const firstMedia = ch.programs[0]?.Media?.[0];
+            const vcn = firstMedia?.channelVcn ? String(firstMedia.channelVcn) : "";
+            const callSign = firstMedia?.channelCallSign ? String(firstMedia.channelCallSign) : "";
+            const channelKey =
+              vcn && callSign
+                ? `${vcn} ${callSign}${ch.title && ch.title !== callSign ? ` (${ch.title})` : ""}`
+                : callSign || ch.title || ch.id;
+            const chHeader = `📺 ${ch.title} [channel_id: ${ch.id}] [channel_key: ${channelKey}]`;
             const progLines = ch.programs.map((p) => formatProgram(p)).join("\n");
             return `${chHeader}\n${progLines}`;
           })

@@ -42,6 +42,8 @@ function makeProgram(overrides: Record<string, unknown> = {}): Record<string, un
       {
         channelCallSign: "TNT",
         channelIdentifier: "ch-tnt",
+        channelVcn: "3.1",
+        channelTitle: "TBS",
         beginsAt: 1717200000,
         endsAt: 1717207200,
       },
@@ -91,6 +93,8 @@ describe("get_live_tv_guide", () => {
     assert.match(text, /program_id: 1001/);
     assert.match(text, /program_title: National Treasure/);
     assert.match(text, /program_type: movie/);
+    assert.match(text, /airing_time: 1717200000/);
+    assert.match(text, /channel_key: 3\.1 TNT \(TBS\)/);
   });
 
   it("returns not-configured message when no EPG provider", async () => {

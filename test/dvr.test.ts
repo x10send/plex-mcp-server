@@ -273,10 +273,10 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["hints[ratingKey]"], "plex%3A%2F%2Fepisode%2Fabc");
+    assert.equal(params?.["hints[ratingKey]"], "plex://episode/abc");
     assert.equal(params?.["hints[guid]"], "plex://episode/abc");
     assert.equal(params?.["hints[title]"], "My Show");
-    assert.equal(params?.["params[airingChannels]"], "ch-tnt");
+    assert.equal(params?.["params[airingChannels]"], undefined);
   });
 
   it("omits hints[title] when program_title is not provided", async () => {
@@ -433,6 +433,39 @@ describe("schedule_recording", () => {
     assert.match(text, /hints\[ratingKey\]/);
   });
 
+  it("sends channelKey-formatted airingChannels and airingTimes when provided", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      {
+        program_id: "1001",
+        channel_key: "3.1 KTVKDT (Independent)",
+        airing_time: 1780905600,
+      },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.["params[airingChannels]"], "channelKey=3.1 KTVKDT (Independent)");
+    assert.equal(params?.["params[airingTimes]"], "1780905600");
+  });
+
+  it("omits airingChannels and airingTimes when neither channel_key nor airing_time provided", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(register, "schedule_recording", { program_id: "1001" }, client);
+    const params = client.getLastPostParams();
+    assert.equal(params?.["params[airingChannels]"], undefined);
+    assert.equal(params?.["params[airingTimes]"], undefined);
+  });
+
   it("uses show content type (2) and oneShot=false for program_type=show", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
@@ -465,9 +498,9 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["type"], "4");
-    assert.equal(params?.["hints[type]"], "4");
-    assert.equal(params?.["params[libraryType]"], "2");
+    assert.equal(params?.["type"], "1");
+    assert.equal(params?.["hints[type]"], "1");
+    assert.equal(params?.["params[libraryType]"], "1");
   });
 });
 
