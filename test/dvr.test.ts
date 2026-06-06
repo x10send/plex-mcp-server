@@ -215,6 +215,58 @@ describe("get_scheduled_recordings", () => {
     assert.match(text, /\[ID: 99\] Key-Only Show/);
   });
 
+  it("extracts title from Directory field (primary GET response structure)", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            id: "263",
+            type: 2,
+            title: "All Episodes",
+            airingsType: "New and Repeat Airings",
+            Directory: {
+              title: "Jeopardy!",
+              year: "1984",
+              guid: "plex://show/jeop123",
+              nextScheduledRecording: "1780712940",
+            },
+            prefs: { oneShot: false, endOffsetMinutes: 5 },
+            params: { airingChannels: "ch-abc=ABC" },
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /\[ID: 263\] Jeopardy! — All Episodes/);
+    assert.match(text, /Series Recordings:/);
+    assert.match(text, /Next:/);
+    assert.match(text, /Filter: New and Repeat Airings/);
+    assert.match(text, /Channel: ABC/);
+    assert.match(text, /Padding: \+5 min/);
+  });
+
+  it("handles Directory as a single-element array", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            id: "64",
+            type: 2,
+            title: "All Episodes",
+            airingsType: "New Airings Only",
+            Directory: [{ title: "Late Show with Stephen Colbert", year: "2015" }],
+            prefs: { oneShot: false },
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /Late Show with Stephen Colbert/);
+    assert.match(text, /Filter: New Airings Only/);
+  });
+
   it("handles hints/prefs/params as single-element arrays (Plex array-wrapping variant)", async () => {
     const client = makeMockClient();
     client.setResponse(SUBS_PATH, {

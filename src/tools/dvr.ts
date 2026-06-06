@@ -25,6 +25,14 @@ interface DvrSubscriptionParams {
   mediaProviderID?: unknown;
 }
 
+interface DvrSubscriptionDirectory {
+  title?: unknown;
+  year?: unknown;
+  guid?: unknown;
+  thumb?: unknown;
+  nextScheduledRecording?: unknown; // Unix seconds
+}
+
 interface DvrSubscription {
   // ID — Plex field name varies by build; try all known variants.
   id?: unknown;
@@ -34,6 +42,7 @@ interface DvrSubscription {
   type?: unknown;
   title?: unknown;
   thumb?: unknown;
+  airingsType?: unknown; // e.g. "New and Repeat Airings", "New Airings Only"
   targetLibrarySectionID?: unknown;
   targetSectionLocationID?: unknown;
   // Flat fields — present in some Plex builds / legacy responses.
@@ -43,14 +52,15 @@ interface DvrSubscription {
   startTimeOffset?: unknown;
   endTimeOffset?: unknown;
   status?: unknown;
-  // Nested objects — camelCase (current) or PascalCase (older) variants.
-  // May be a plain object OR a single-element array depending on the Plex build.
+  // Nested objects — camelCase or PascalCase; may be plain object or single-element array.
   prefs?: unknown;
   Prefs?: unknown;
   hints?: unknown;
   Hints?: unknown;
   params?: unknown;
   Params?: unknown;
+  // Directory is the primary source of show metadata on GET responses.
+  Directory?: unknown;
 }
 
 interface SubscriptionsResponse {
@@ -202,17 +212,24 @@ function subParams(s: DvrSubscription): DvrSubscriptionParams | undefined {
   );
 }
 
+function subDirectory(s: DvrSubscription): DvrSubscriptionDirectory | undefined {
+  return normaliseNested<DvrSubscriptionDirectory>(s.Directory);
+}
+
 function formatSubscription(s: DvrSubscription): string {
   const id = subId(s);
+  const dir = subDirectory(s);
   const hints = subHints(s);
   const prefs = subPrefs(s);
   const params = subParams(s);
 
+  // Title: Directory is the primary source on GET responses; hints is the fallback
+  // (populated on POST echo-backs). "All Episodes" is Plex's type label, not a title.
+  const dirTitle = dir?.title != null ? String(dir.title) : undefined;
   const hintsTitle = hints?.title != null ? String(hints.title) : undefined;
   const rawTitle = s.title != null ? String(s.title) : undefined;
-  // "All Episodes" is Plex's generic subscription type label, not the actual show title.
   const fallbackTitle = rawTitle !== "All Episodes" ? rawTitle : undefined;
-  const title = hintsTitle ?? fallbackTitle ?? "Unknown";
+  const title = dirTitle ?? hintsTitle ?? fallbackTitle ?? "Unknown";
   const isOneShot = Boolean(prefs?.oneShot);
 
   const rawChannels =
@@ -236,6 +253,10 @@ function formatSubscription(s: DvrSubscription): string {
   const endSec = s.endTime != null ? Number(s.endTime) : undefined;
   const endOffsetMin = prefs?.endOffsetMinutes != null ? Number(prefs.endOffsetMinutes) : undefined;
 
+  const nextRecSec =
+    dir?.nextScheduledRecording != null ? Number(dir.nextScheduledRecording) : undefined;
+  const airingsType = s.airingsType != null ? String(s.airingsType) : undefined;
+
   const displayTitle = isOneShot ? title : `${title} — All Episodes`;
   const lines: string[] = [`[ID: ${id}] ${displayTitle}`];
 
@@ -244,12 +265,21 @@ function formatSubscription(s: DvrSubscription): string {
     lines.push(`  ${label}: ${channelDisplay}`);
   }
 
-  if (airingTimeSec !== undefined) {
-    let scheduled = formatLocalDateTime(airingTimeSec);
-    if (endSec !== undefined) scheduled += ` – ${formatLocalTimeShort(endSec)}`;
-    lines.push(`  Scheduled: ${scheduled}`);
-  } else if (!isOneShot) {
-    lines.push(`  Any new airing`);
+  if (isOneShot) {
+    if (airingTimeSec !== undefined) {
+      let scheduled = formatLocalDateTime(airingTimeSec);
+      if (endSec !== undefined) scheduled += ` – ${formatLocalTimeShort(endSec)}`;
+      lines.push(`  Scheduled: ${scheduled}`);
+    }
+  } else {
+    if (nextRecSec !== undefined && nextRecSec > 0) {
+      lines.push(`  Next: ${formatLocalDateTime(nextRecSec)}`);
+    }
+    if (airingsType) {
+      lines.push(`  Filter: ${airingsType}`);
+    } else if (nextRecSec === undefined) {
+      lines.push(`  Any new airing`);
+    }
   }
 
   if (endOffsetMin !== undefined && endOffsetMin > 0) {
@@ -383,7 +413,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
 
   server.tool(
     "get_recording_conflicts",
-    "Identify duplicate DVR recording subscriptions — same show or GUID scheduled more than once. Groups by hints.guid (primary) or hints.title (fallback), returning duplicate groups with IDs so you can cancel the extras with cancel_recording.",
+    "Identify duplicate DVR recording subscriptions — same show or GUID scheduled more than once. Groups by guid (primary) or title (fallback), returning duplicate groups with IDs so you can cancel the extras with cancel_recording.",
     {},
     async () => {
       try {
@@ -403,12 +433,15 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         const byTitle = new Map<string, DvrSubscription[]>();
 
         for (const s of subs) {
+          const dir = subDirectory(s);
           const hints = subHints(s);
-          const guid = hints?.guid != null ? String(hints.guid) : undefined;
+          const rawGuid = dir?.guid ?? hints?.guid;
+          const guid = rawGuid != null ? String(rawGuid) : undefined;
+          const rawTitle = dir?.title ?? hints?.title;
           const title =
-            hints?.title != null
-              ? String(hints.title)
-              : s.title != null
+            rawTitle != null
+              ? String(rawTitle)
+              : s.title != null && String(s.title) !== "All Episodes"
                 ? String(s.title)
                 : undefined;
 
@@ -429,8 +462,9 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
             (a, b) =>
               Number(subId(a) === "?" ? 0 : subId(a)) - Number(subId(b) === "?" ? 0 : subId(b))
           );
-          const label =
-            subHints(sorted[0])?.title != null ? String(subHints(sorted[0])!.title) : guid;
+          const s0 = sorted[0];
+          const labelTitle = subDirectory(s0)?.title ?? subHints(s0)?.title;
+          const label = labelTitle != null ? String(labelTitle) : guid;
           const keepId = subId(sorted[0]);
           const cancelIds = sorted
             .slice(1)
@@ -788,15 +822,17 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           };
         }
 
+        const subD = subDirectory(sub);
         const subH = subHints(sub);
         const subPa = subParams(sub);
         const lines = [
           `Recording scheduled.`,
           `Subscription ID: ${subId(sub)} (use this to cancel)`,
         ];
+        const rawDisplayTitle = subD?.title ?? subH?.title;
         const displayTitle =
-          subH?.title != null
-            ? String(subH.title)
+          rawDisplayTitle != null
+            ? String(rawDisplayTitle)
             : sub.title && String(sub.title) !== "All Episodes"
               ? String(sub.title)
               : undefined;
