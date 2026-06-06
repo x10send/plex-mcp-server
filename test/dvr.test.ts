@@ -5,36 +5,49 @@ import { makeMockClient, callTool, type RegisterFn } from "./helpers.js";
 
 const register: RegisterFn = registerDvrTools;
 
-// All DVR tools hit /media/subscriptions directly — no device discovery step.
 const SUBS_PATH = "/media/subscriptions";
 
+// Models the actual nested structure Plex returns for subscriptions.
 const SUBSCRIPTION = {
   id: "42",
-  title: "National Treasure",
-  type: "oneShot",
-  channelTitle: "TNT",
-  channelKey: "/livetv/channels/ch-tnt",
-  startTime: 1717200000,
-  endTime: 1717207200,
+  type: 2,
+  title: "All Episodes",
+  hints: {
+    title: "National Treasure",
+    year: 2004,
+    guid: "plex://movie/abc123",
+  },
+  prefs: {
+    oneShot: true,
+    startOffsetMinutes: 0,
+    endOffsetMinutes: 5,
+    onlyNewAirings: 1,
+  },
+  params: {
+    airingChannels: "ch-tnt=TNT",
+    airingTimes: "1717200000",
+    mediaProviderID: 10,
+  },
   status: "scheduled",
 };
 
 // ── get_scheduled_recordings ──────────────────────────────────────────────────
 
 describe("get_scheduled_recordings", () => {
-  it("returns scheduled recordings list", async () => {
+  it("returns scheduled recordings list with nested field extraction", async () => {
     const client = makeMockClient();
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
     const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
     assert.equal(isError, false);
-    assert.match(text, /Scheduled recordings \(1\)/);
-    assert.match(text, /\[42\] National Treasure/);
-    assert.match(text, /\[oneShot\]/);
+    assert.match(text, /Scheduled Recordings \(1\)/);
+    assert.match(text, /\[ID: 42\] National Treasure/);
+    assert.match(text, /One-Shot Episodes:/);
     assert.match(text, /TNT/);
-    assert.match(text, /Status: scheduled/);
-    assert.match(text, /Starts:/);
+    assert.match(text, /Scheduled:/);
+    assert.match(text, /Padding: \+5 min/);
+    assert.doesNotMatch(text, /Status:/);
   });
 
   it("returns no-recordings message when empty", async () => {
@@ -47,7 +60,7 @@ describe("get_scheduled_recordings", () => {
     assert.match(text, /No scheduled recordings/);
   });
 
-  it("handles subscription with no optional fields", async () => {
+  it("handles subscription with no optional fields (treated as series)", async () => {
     const client = makeMockClient();
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [{ id: "1", title: "Bare" }] },
@@ -55,32 +68,138 @@ describe("get_scheduled_recordings", () => {
     const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
     assert.equal(isError, false);
     assert.match(text, /Bare/);
+    assert.match(text, /Series Recordings:/);
     assert.doesNotMatch(text, /Channel:/);
     assert.doesNotMatch(text, /Status:/);
   });
 
-  it("shows pre-roll and post-roll offsets when present", async () => {
+  it("shows end-offset padding when present", async () => {
     const client = makeMockClient();
     client.setResponse(SUBS_PATH, {
       MediaContainer: {
-        MediaSubscription: [{ id: "5", title: "Movie", startTimeOffset: -30, endTimeOffset: 60 }],
+        MediaSubscription: [{ id: "5", prefs: { oneShot: true, endOffsetMinutes: 7 } }],
       },
     });
     const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
-    assert.match(text, /Pre-roll: 30s/);
-    assert.match(text, /Post-roll: 60s/);
+    assert.match(text, /Padding: \+7 min/);
   });
 
-  it("endTime without startTime does not produce orphaned arrow", async () => {
+  it("shows no Scheduled line when airingTimes and startTime are absent", async () => {
     const client = makeMockClient();
     client.setResponse(SUBS_PATH, {
       MediaContainer: {
-        MediaSubscription: [{ id: "7", title: "Oddity", endTime: 1717207200 }],
+        MediaSubscription: [{ id: "7", title: "Oddity" }],
       },
     });
     const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
-    assert.doesNotMatch(text, /→/);
-    assert.doesNotMatch(text, /Starts:/);
+    assert.doesNotMatch(text, /Scheduled:/);
+  });
+
+  it("shows time range when both airingTimes and endTime are present", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            id: "9",
+            prefs: { oneShot: true },
+            hints: { title: "Movie" },
+            params: { airingChannels: "ch-abc=ABC", airingTimes: "1717200000" },
+            endTime: 1717207200,
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /Scheduled:.*–/);
+  });
+
+  it("groups one-shot subscriptions under One-Shot Episodes and series under Series Recordings", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            id: "10",
+            hints: { title: "Movie One", guid: "plex://movie/1" },
+            prefs: { oneShot: true },
+            params: { airingTimes: "1717200000" },
+          },
+          {
+            id: "20",
+            hints: { title: "Highlander" },
+            prefs: { oneShot: false },
+          },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /One-Shot Episodes:/);
+    assert.match(text, /Movie One/);
+    assert.match(text, /Series Recordings:/);
+    assert.match(text, /Highlander — All Episodes/);
+  });
+
+  it("sorts one-shot subscriptions by airingTimes ascending", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            id: "2",
+            hints: { title: "Later Show" },
+            prefs: { oneShot: true },
+            params: { airingTimes: "1717300000" },
+          },
+          {
+            id: "1",
+            hints: { title: "Earlier Show" },
+            prefs: { oneShot: true },
+            params: { airingTimes: "1717200000" },
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    const earlierPos = text.indexOf("Earlier Show");
+    const laterPos = text.indexOf("Later Show");
+    assert.ok(earlierPos < laterPos, "Earlier Show should appear before Later Show");
+  });
+
+  it("shows multiple channels with Channels label when airingChannels has comma", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            id: "11",
+            hints: { title: "Broadcast Show" },
+            prefs: { oneShot: false },
+            params: { airingChannels: "ch-abc=40.2 MeTV,ch-xyz=10.3 KSAZ" },
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /Channels: 40\.2 MeTV, 10\.3 KSAZ/);
+  });
+
+  it("debug=true returns raw subscription JSON", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "get_scheduled_recordings",
+      { debug: true },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /Total subscriptions: 1/);
+    assert.match(text, /First 2 entries/);
+    assert.match(text, /National Treasure/);
   });
 
   it("returns not-configured message when /media/subscriptions returns 404", async () => {
@@ -105,8 +224,81 @@ describe("get_scheduled_recordings", () => {
     });
     const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
     assert.equal(isError, false);
-    assert.match(text, /Scheduled recordings \(1\)/);
+    assert.match(text, /Scheduled Recordings \(1\)/);
     assert.match(text, /National Treasure/);
+  });
+});
+
+// ── get_recording_conflicts ───────────────────────────────────────────────────
+
+describe("get_recording_conflicts", () => {
+  it("identifies duplicate subscriptions by GUID", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          { id: "1", hints: { title: "Highlander", guid: "plex://episode/abc" } },
+          { id: "2", hints: { title: "Highlander", guid: "plex://episode/abc" } },
+          { id: "3", hints: { title: "Highlander", guid: "plex://episode/abc" } },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(register, "get_recording_conflicts", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /Found 1 duplicate group/);
+    assert.match(text, /Highlander/);
+    assert.match(text, /Duplicates: 3/);
+    assert.match(text, /Keep ID: 1/);
+    assert.match(text, /Cancel IDs: 2, 3/);
+  });
+
+  it("identifies duplicates by title when GUID is absent", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          { id: "10", hints: { title: "Mystery Show" } },
+          { id: "11", hints: { title: "Mystery Show" } },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(register, "get_recording_conflicts", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /Mystery Show/);
+    assert.match(text, /matched by title/);
+    assert.match(text, /Keep ID: 10/);
+    assert.match(text, /Cancel IDs: 11/);
+  });
+
+  it("returns no-duplicates message when all subscriptions are unique", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          { id: "1", hints: { title: "Show A", guid: "plex://episode/a" } },
+          { id: "2", hints: { title: "Show B", guid: "plex://episode/b" } },
+        ],
+      },
+    });
+    const { text, isError } = await callTool(register, "get_recording_conflicts", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /No duplicate recordings found/);
+    assert.match(text, /2 subscriptions/);
+  });
+
+  it("returns not-configured when /media/subscriptions returns 404", async () => {
+    const client = makeMockClient();
+    client.setError(SUBS_PATH, 404, "Not found");
+    const { text, isError } = await callTool(register, "get_recording_conflicts", {}, client);
+    assert.equal(isError, false);
+    assert.match(text, /not configured/i);
+  });
+
+  it("returns error on API failure (non-404)", async () => {
+    const client = makeMockClient();
+    client.setError(SUBS_PATH, 503, "Service unavailable");
+    const { isError } = await callTool(register, "get_recording_conflicts", {}, client);
+    assert.equal(isError, true);
   });
 });
 
@@ -146,8 +338,7 @@ describe("schedule_recording", () => {
     assert.match(text, /Subscription ID: 42/);
     assert.match(text, /National Treasure/);
     assert.match(text, /TNT/);
-    assert.match(text, /Starts:/);
-    assert.match(text, /Ends:/);
+    assert.match(text, /Scheduled:/);
   });
 
   it("schedules a recording without program_title (title is optional)", async () => {
@@ -187,7 +378,7 @@ describe("schedule_recording", () => {
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
       MediaContainer: {
-        MediaSubscription: [{ id: "99", title: "Show", channelTitle: "NBC" }],
+        MediaSubscription: [{ id: "99", hints: { title: "Show" }, channelTitle: "NBC" }],
       },
     });
     const { text, isError } = await callTool(
@@ -260,7 +451,7 @@ describe("schedule_recording", () => {
     assert.match(text, /422/);
   });
 
-  it("sends hints[ratingKey], hints[guid], and params[airingChannels] as POST params", async () => {
+  it("sends hints[ratingKey], hints[guid], and hints[title] as POST params", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
@@ -598,13 +789,13 @@ describe("dvr formatting edge cases", () => {
   it("formatSubscription: missing id shows ? placeholder", async () => {
     const client = makeMockClient();
     client.setResponse(SUBS_PATH, {
-      MediaContainer: { MediaSubscription: [{ title: "No ID Show" }] },
+      MediaContainer: { MediaSubscription: [{ hints: { title: "No ID Show" } }] },
     });
     const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
-    assert.match(text, /\[\?\]/);
+    assert.match(text, /\[ID: \?\]/);
   });
 
-  it("schedule_recording: subscription missing startTime/endTime omits those lines", async () => {
+  it("schedule_recording: subscription without airingTimes or startTime omits Scheduled line", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
@@ -613,7 +804,20 @@ describe("dvr formatting edge cases", () => {
       },
     });
     const { text } = await callTool(register, "schedule_recording", { program_id: "5" }, client);
+    assert.doesNotMatch(text, /Scheduled:/);
     assert.doesNotMatch(text, /Starts:/);
     assert.doesNotMatch(text, /Ends:/);
+  });
+
+  it("schedule_recording: falls back to flat channelTitle when params.airingChannels absent", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [{ id: "8", hints: { title: "Flat Show" }, channelTitle: "NBC" }],
+      },
+    });
+    const { text } = await callTool(register, "schedule_recording", { program_id: "5" }, client);
+    assert.match(text, /Channel: NBC/);
   });
 });

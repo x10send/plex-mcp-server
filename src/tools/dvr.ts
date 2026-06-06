@@ -5,17 +5,44 @@ import { toolError } from "./shared.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+interface DvrSubscriptionPrefs {
+  oneShot?: unknown;
+  startOffsetMinutes?: unknown;
+  endOffsetMinutes?: unknown;
+  onlyNewAirings?: unknown;
+}
+
+interface DvrSubscriptionHints {
+  title?: unknown;
+  year?: unknown;
+  guid?: unknown;
+  thumb?: unknown;
+}
+
+interface DvrSubscriptionParams {
+  airingChannels?: unknown;
+  airingTimes?: unknown;
+  mediaProviderID?: unknown;
+}
+
 interface DvrSubscription {
   id?: unknown;
-  title?: unknown;
   type?: unknown;
+  title?: unknown;
+  thumb?: unknown;
+  targetLibrarySectionID?: unknown;
+  targetSectionLocationID?: unknown;
+  // Legacy flat fields — present in some Plex builds.
   channelTitle?: unknown;
-  channelKey?: unknown;
   startTime?: unknown;
   endTime?: unknown;
   startTimeOffset?: unknown;
   endTimeOffset?: unknown;
   status?: unknown;
+  // Nested objects — present in current Plex builds.
+  prefs?: DvrSubscriptionPrefs;
+  hints?: DvrSubscriptionHints;
+  params?: DvrSubscriptionParams;
 }
 
 interface SubscriptionsResponse {
@@ -86,22 +113,108 @@ const DVR_NOT_CONFIGURED =
   "DVR is not configured on this Plex server, or no DVR device is paired. " +
   "Set up a tuner with DVR capability in Plex settings (Settings → Live TV & DVR).";
 
-function formatTimestamp(epoch: number): string {
-  return new Date(epoch * 1000).toISOString().replace("T", " ").slice(0, 19) + " UTC";
+function formatLocalDateTime(epochSec: number): string {
+  const d = new Date(epochSec * 1000);
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const h = d.getHours();
+  const m = d.getMinutes().toString().padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  return `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}, ${h12}:${m} ${ampm}`;
+}
+
+function formatLocalTimeShort(epochSec: number): string {
+  const d = new Date(epochSec * 1000);
+  const h = d.getHours();
+  const m = d.getMinutes().toString().padStart(2, "0");
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  return `${h12}:${m} ${ampm}`;
+}
+
+// Parse "channelId=Display Name" format — may be a comma/semicolon-separated list.
+function parseAiringChannels(raw: string): string {
+  return raw
+    .split(/[,;]/)
+    .map((ch) => {
+      const eq = ch.indexOf("=");
+      return eq >= 0 ? ch.slice(eq + 1).trim() : ch.trim();
+    })
+    .filter(Boolean)
+    .join(", ");
 }
 
 function formatSubscription(s: DvrSubscription): string {
-  const id = String(s.id ?? "?");
-  const title = String(s.title ?? "Unknown");
-  const type = s.type ? ` [${s.type}]` : "";
-  const channel = s.channelTitle ? `\n  Channel: ${s.channelTitle}` : "";
-  const timeRange = s.startTime
-    ? `\n  Starts: ${formatTimestamp(Number(s.startTime))}${s.endTime ? ` → ${formatTimestamp(Number(s.endTime))}` : ""}`
+  const id = s.id != null ? String(s.id) : "?";
+  const hintsTitle = s.hints?.title != null ? String(s.hints.title) : undefined;
+  const rawTitle = s.title != null ? String(s.title) : undefined;
+  const title = hintsTitle ?? rawTitle ?? "Unknown";
+  const isOneShot = Boolean(s.prefs?.oneShot);
+
+  const rawChannels =
+    s.params?.airingChannels != null
+      ? String(s.params.airingChannels)
+      : s.channelTitle != null
+        ? String(s.channelTitle)
+        : "";
+  const channelDisplay = rawChannels
+    ? rawChannels.includes("=")
+      ? parseAiringChannels(rawChannels)
+      : rawChannels
     : "";
-  const status = s.status ? `\n  Status: ${s.status}` : "";
-  const padStart = s.startTimeOffset ? `\n  Pre-roll: ${Math.abs(Number(s.startTimeOffset))}s` : "";
-  const padEnd = s.endTimeOffset ? `\n  Post-roll: ${s.endTimeOffset}s` : "";
-  return `[${id}] ${title}${type}${channel}${timeRange}${status}${padStart}${padEnd}`;
+
+  const airingTimeSec =
+    s.params?.airingTimes != null
+      ? Number(s.params.airingTimes)
+      : s.startTime != null
+        ? Number(s.startTime)
+        : undefined;
+  const endSec = s.endTime != null ? Number(s.endTime) : undefined;
+  const endOffsetMin =
+    s.prefs?.endOffsetMinutes != null ? Number(s.prefs.endOffsetMinutes) : undefined;
+
+  const displayTitle = isOneShot ? title : `${title} — All Episodes`;
+  const lines: string[] = [`[ID: ${id}] ${displayTitle}`];
+
+  if (channelDisplay) {
+    const label = channelDisplay.includes(",") ? "Channels" : "Channel";
+    lines.push(`  ${label}: ${channelDisplay}`);
+  }
+
+  if (airingTimeSec !== undefined) {
+    let scheduled = formatLocalDateTime(airingTimeSec);
+    if (endSec !== undefined) scheduled += ` – ${formatLocalTimeShort(endSec)}`;
+    lines.push(`  Scheduled: ${scheduled}`);
+  } else if (!isOneShot) {
+    lines.push(`  Any new airing`);
+  }
+
+  if (endOffsetMin !== undefined && endOffsetMin > 0) {
+    lines.push(`  Padding: +${endOffsetMin} min`);
+  }
+
+  return lines.join("\n");
+}
+
+// Plex may return MediaSubscription as an array or a bare object (single item).
+function normaliseSubscriptions(raw: unknown): DvrSubscription[] {
+  if (Array.isArray(raw)) return raw as DvrSubscription[];
+  if (raw && typeof raw === "object") return [raw as DvrSubscription];
+  return [];
 }
 
 // Repeatedly URL-decode until stable — EPG ratingKeys may be multiply encoded.
@@ -119,19 +232,89 @@ function fullyDecode(s: string): string {
   return curr;
 }
 
-// Plex may return MediaSubscription as an array or a bare object (single item).
-function normaliseSubscriptions(raw: unknown): DvrSubscription[] {
-  if (Array.isArray(raw)) return raw as DvrSubscription[];
-  if (raw && typeof raw === "object") return [raw as DvrSubscription];
-  return [];
-}
-
 // ── Tool registration ────────────────────────────────────────────────────────
 
 export function registerDvrTools(server: McpServer, client: IPlexClient): void {
   server.tool(
     "get_scheduled_recordings",
-    "List all DVR recording subscriptions — scheduled one-time recordings and series season passes — with their IDs, channels, and air times. The subscription ID is needed to cancel a recording.",
+    "List all DVR recording subscriptions grouped by type (one-shot episodes vs. series season passes) with IDs, channels, and air times. Use subscription IDs with cancel_recording.",
+    {
+      debug: z
+        .union([z.boolean(), z.string().transform((v) => v === "true")])
+        .optional()
+        .describe(
+          "Return raw JSON of the first two subscriptions for diagnosing field mapping issues."
+        ),
+    },
+    async (args) => {
+      try {
+        let data: SubscriptionsResponse;
+        try {
+          data = await client.get<SubscriptionsResponse>(SUBSCRIPTIONS_PATH);
+        } catch (err) {
+          if (err instanceof PlexApiError && err.status === 404) {
+            return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
+          }
+          throw err;
+        }
+
+        const subs = normaliseSubscriptions(data.MediaContainer?.MediaSubscription);
+        if (subs.length === 0) {
+          return { content: [{ type: "text", text: "No scheduled recordings." }] };
+        }
+
+        if (args.debug) {
+          return {
+            content: [
+              {
+                type: "text",
+                text:
+                  `Total subscriptions: ${subs.length}\n` +
+                  `First 2 entries (raw):\n` +
+                  JSON.stringify(subs.slice(0, 2), null, 2).slice(0, 4000),
+              },
+            ],
+          };
+        }
+
+        const oneShots = subs
+          .filter((s) => Boolean(s.prefs?.oneShot))
+          .sort(
+            (a, b) =>
+              Number(a.params?.airingTimes ?? a.startTime ?? 0) -
+              Number(b.params?.airingTimes ?? b.startTime ?? 0)
+          );
+        const seriesPass = subs.filter((s) => !s.prefs?.oneShot);
+
+        const indent = (text: string) =>
+          text
+            .split("\n")
+            .map((l) => "  " + l)
+            .join("\n");
+
+        const header = `Scheduled Recordings (${subs.length}):\n`;
+        const sections: string[] = [];
+        if (oneShots.length > 0) {
+          sections.push(
+            `One-Shot Episodes:\n${oneShots.map((s) => indent(formatSubscription(s))).join("\n\n")}`
+          );
+        }
+        if (seriesPass.length > 0) {
+          sections.push(
+            `Series Recordings:\n${seriesPass.map((s) => indent(formatSubscription(s))).join("\n\n")}`
+          );
+        }
+
+        return { content: [{ type: "text", text: header + "\n" + sections.join("\n\n") }] };
+      } catch (err) {
+        return toolError(err);
+      }
+    }
+  );
+
+  server.tool(
+    "get_recording_conflicts",
+    "Identify duplicate DVR recording subscriptions — same show or GUID scheduled more than once. Groups by hints.guid (primary) or hints.title (fallback), returning duplicate groups with IDs so you can cancel the extras with cancel_recording.",
     {},
     async () => {
       try {
@@ -144,13 +327,78 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           }
           throw err;
         }
+
         const subs = normaliseSubscriptions(data.MediaContainer?.MediaSubscription);
-        if (subs.length === 0) {
-          return { content: [{ type: "text", text: "No scheduled recordings." }] };
+
+        const byGuid = new Map<string, DvrSubscription[]>();
+        const byTitle = new Map<string, DvrSubscription[]>();
+
+        for (const s of subs) {
+          const guid = s.hints?.guid != null ? String(s.hints.guid) : undefined;
+          const title =
+            s.hints?.title != null
+              ? String(s.hints.title)
+              : s.title != null
+                ? String(s.title)
+                : undefined;
+
+          if (guid) {
+            if (!byGuid.has(guid)) byGuid.set(guid, []);
+            byGuid.get(guid)!.push(s);
+          } else if (title) {
+            if (!byTitle.has(title)) byTitle.set(title, []);
+            byTitle.get(title)!.push(s);
+          }
         }
-        const header = `Scheduled recordings (${subs.length})\n\n`;
-        const body = subs.map(formatSubscription).join("\n\n");
-        return { content: [{ type: "text", text: header + body }] };
+
+        const conflicts: string[] = [];
+
+        for (const [guid, group] of byGuid) {
+          if (group.length <= 1) continue;
+          const sorted = [...group].sort((a, b) => Number(a.id ?? 0) - Number(b.id ?? 0));
+          const label = sorted[0].hints?.title != null ? String(sorted[0].hints.title) : guid;
+          const keepId = sorted[0].id != null ? String(sorted[0].id) : "?";
+          const cancelIds = sorted
+            .slice(1)
+            .map((s) => (s.id != null ? String(s.id) : "?"))
+            .join(", ");
+          conflicts.push(
+            `${label}\n` +
+              `  Duplicates: ${group.length}\n` +
+              `  Keep ID: ${keepId}\n` +
+              `  Cancel IDs: ${cancelIds}`
+          );
+        }
+
+        for (const [title, group] of byTitle) {
+          if (group.length <= 1) continue;
+          const sorted = [...group].sort((a, b) => Number(a.id ?? 0) - Number(b.id ?? 0));
+          const keepId = sorted[0].id != null ? String(sorted[0].id) : "?";
+          const cancelIds = sorted
+            .slice(1)
+            .map((s) => (s.id != null ? String(s.id) : "?"))
+            .join(", ");
+          conflicts.push(
+            `${title} (matched by title)\n` +
+              `  Duplicates: ${group.length}\n` +
+              `  Keep ID: ${keepId}\n` +
+              `  Cancel IDs: ${cancelIds}`
+          );
+        }
+
+        if (conflicts.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No duplicate recordings found across ${subs.length} subscription${subs.length !== 1 ? "s" : ""}.`,
+              },
+            ],
+          };
+        }
+
+        const header = `Found ${conflicts.length} duplicate group${conflicts.length !== 1 ? "s" : ""} across ${subs.length} subscriptions:\n\n`;
+        return { content: [{ type: "text", text: header + conflicts.join("\n\n") }] };
       } catch (err) {
         return toolError(err);
       }
@@ -462,14 +710,38 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
             ],
           };
         }
+
         const lines = [
           `Recording scheduled.`,
-          `Subscription ID: ${sub.id ?? "unknown"} (use this to cancel)`,
+          `Subscription ID: ${sub.id != null ? String(sub.id) : "unknown"} (use this to cancel)`,
         ];
-        if (sub.title) lines.push(`Title: ${sub.title}`);
-        if (sub.channelTitle) lines.push(`Channel: ${sub.channelTitle}`);
-        if (sub.startTime) lines.push(`Starts: ${formatTimestamp(Number(sub.startTime))}`);
-        if (sub.endTime) lines.push(`Ends: ${formatTimestamp(Number(sub.endTime))}`);
+        const displayTitle =
+          sub.hints?.title != null
+            ? String(sub.hints.title)
+            : sub.title
+              ? String(sub.title)
+              : undefined;
+        if (displayTitle) lines.push(`Title: ${displayTitle}`);
+        const rawChannels =
+          sub.params?.airingChannels != null
+            ? String(sub.params.airingChannels)
+            : sub.channelTitle != null
+              ? String(sub.channelTitle)
+              : "";
+        if (rawChannels) {
+          const channelDisplay = rawChannels.includes("=")
+            ? parseAiringChannels(rawChannels)
+            : rawChannels;
+          if (channelDisplay) lines.push(`Channel: ${channelDisplay}`);
+        }
+        const startSec =
+          sub.params?.airingTimes != null
+            ? Number(sub.params.airingTimes)
+            : sub.startTime != null
+              ? Number(sub.startTime)
+              : undefined;
+        if (startSec) lines.push(`Scheduled: ${formatLocalDateTime(startSec)}`);
+
         const body = lines.join("\n");
         return {
           content: [
