@@ -44,12 +44,13 @@ interface DvrSubscription {
   endTimeOffset?: unknown;
   status?: unknown;
   // Nested objects — camelCase (current) or PascalCase (older) variants.
-  prefs?: DvrSubscriptionPrefs;
-  Prefs?: DvrSubscriptionPrefs;
-  hints?: DvrSubscriptionHints;
-  Hints?: DvrSubscriptionHints;
-  params?: DvrSubscriptionParams;
-  Params?: DvrSubscriptionParams;
+  // May be a plain object OR a single-element array depending on the Plex build.
+  prefs?: unknown;
+  Prefs?: unknown;
+  hints?: unknown;
+  Hints?: unknown;
+  params?: unknown;
+  Params?: unknown;
 }
 
 interface SubscriptionsResponse {
@@ -174,16 +175,31 @@ function subId(s: DvrSubscription): string {
   return "?";
 }
 
+// Plex sometimes wraps a single child element in an array. Unwrap if needed.
+function normaliseNested<T>(v: unknown): T | undefined {
+  if (v == null) return undefined;
+  if (Array.isArray(v)) return (v as unknown[])[0] as T | undefined;
+  if (typeof v === "object") return v as T;
+  return undefined;
+}
+
 function subHints(s: DvrSubscription): DvrSubscriptionHints | undefined {
-  return s.hints ?? s.Hints;
+  return (
+    normaliseNested<DvrSubscriptionHints>(s.hints) ?? normaliseNested<DvrSubscriptionHints>(s.Hints)
+  );
 }
 
 function subPrefs(s: DvrSubscription): DvrSubscriptionPrefs | undefined {
-  return s.prefs ?? s.Prefs;
+  return (
+    normaliseNested<DvrSubscriptionPrefs>(s.prefs) ?? normaliseNested<DvrSubscriptionPrefs>(s.Prefs)
+  );
 }
 
 function subParams(s: DvrSubscription): DvrSubscriptionParams | undefined {
-  return s.params ?? s.Params;
+  return (
+    normaliseNested<DvrSubscriptionParams>(s.params) ??
+    normaliseNested<DvrSubscriptionParams>(s.Params)
+  );
 }
 
 function formatSubscription(s: DvrSubscription): string {
@@ -194,7 +210,9 @@ function formatSubscription(s: DvrSubscription): string {
 
   const hintsTitle = hints?.title != null ? String(hints.title) : undefined;
   const rawTitle = s.title != null ? String(s.title) : undefined;
-  const title = hintsTitle ?? rawTitle ?? "Unknown";
+  // "All Episodes" is Plex's generic subscription type label, not the actual show title.
+  const fallbackTitle = rawTitle !== "All Episodes" ? rawTitle : undefined;
+  const title = hintsTitle ?? fallbackTitle ?? "Unknown";
   const isOneShot = Boolean(prefs?.oneShot);
 
   const rawChannels =
@@ -299,26 +317,30 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           const keyDump = first
             ? Object.entries(first)
                 .map(([k, v]) => {
-                  const t = v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
-                  return `${k}: ${t}`;
+                  if (v === null) return `${k}: null`;
+                  if (Array.isArray(v))
+                    return `${k}: array(${(v as unknown[]).length})[${JSON.stringify((v as unknown[])[0]).slice(0, 80)}]`;
+                  if (typeof v === "object")
+                    return `${k}: object{${Object.keys(v as object).join(",")}}`;
+                  return `${k}: ${typeof v}=${JSON.stringify(v).slice(0, 40)}`;
                 })
-                .join(", ")
+                .join("\n  ")
             : "(empty)";
-          const hintsFirst = first?.hints ?? first?.Hints;
-          const hintsKeys =
-            hintsFirst && typeof hintsFirst === "object"
-              ? Object.keys(hintsFirst as object).join(", ")
-              : "(no hints/Hints field)";
+          const hintsRaw = first?.hints ?? first?.Hints;
+          const hintsObj = normaliseNested<Record<string, unknown>>(hintsRaw);
+          const hintsKeys = hintsObj
+            ? `${Array.isArray(hintsRaw) ? "[array-wrapped] " : ""}${Object.keys(hintsObj).join(", ")}`
+            : "(no hints/Hints field)";
           return {
             content: [
               {
                 type: "text",
                 text:
                   `Total subscriptions: ${subs.length}\n` +
-                  `First entry top-level keys: ${keyDump}\n` +
+                  `First entry fields:\n  ${keyDump}\n` +
                   `First entry hints keys: ${hintsKeys}\n\n` +
                   `First 2 entries (raw):\n` +
-                  JSON.stringify(subs.slice(0, 2), null, 2).slice(0, 5000),
+                  JSON.stringify(subs.slice(0, 2), null, 2).slice(0, 6000),
               },
             ],
           };
@@ -766,20 +788,22 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           };
         }
 
+        const subH = subHints(sub);
+        const subPa = subParams(sub);
         const lines = [
           `Recording scheduled.`,
-          `Subscription ID: ${sub.id != null ? String(sub.id) : "unknown"} (use this to cancel)`,
+          `Subscription ID: ${subId(sub)} (use this to cancel)`,
         ];
         const displayTitle =
-          sub.hints?.title != null
-            ? String(sub.hints.title)
-            : sub.title
+          subH?.title != null
+            ? String(subH.title)
+            : sub.title && String(sub.title) !== "All Episodes"
               ? String(sub.title)
               : undefined;
         if (displayTitle) lines.push(`Title: ${displayTitle}`);
         const rawChannels =
-          sub.params?.airingChannels != null
-            ? String(sub.params.airingChannels)
+          subPa?.airingChannels != null
+            ? String(subPa.airingChannels)
             : sub.channelTitle != null
               ? String(sub.channelTitle)
               : "";
@@ -790,8 +814,8 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           if (channelDisplay) lines.push(`Channel: ${channelDisplay}`);
         }
         const startSec =
-          sub.params?.airingTimes != null
-            ? Number(sub.params.airingTimes)
+          subPa?.airingTimes != null
+            ? Number(subPa.airingTimes)
             : sub.startTime != null
               ? Number(sub.startTime)
               : undefined;

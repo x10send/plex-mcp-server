@@ -215,6 +215,28 @@ describe("get_scheduled_recordings", () => {
     assert.match(text, /\[ID: 99\] Key-Only Show/);
   });
 
+  it("handles hints/prefs/params as single-element arrays (Plex array-wrapping variant)", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            id: "55",
+            type: 2,
+            title: "All Episodes",
+            hints: [{ title: "Array Show", year: 2020, guid: "plex://show/xyz" }],
+            prefs: [{ oneShot: true, endOffsetMinutes: 5 }],
+            params: [{ airingChannels: "ch-abc=ABC" }],
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /Array Show/);
+    assert.match(text, /One-Shot Episodes:/);
+    assert.match(text, /Channel: ABC/);
+  });
+
   it("handles PascalCase Hints and Prefs field names", async () => {
     const client = makeMockClient();
     client.setResponse(SUBS_PATH, {
