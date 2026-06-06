@@ -26,23 +26,30 @@ interface DvrSubscriptionParams {
 }
 
 interface DvrSubscription {
+  // ID — Plex field name varies by build; try all known variants.
   id?: unknown;
+  key?: unknown;
+  ratingKey?: unknown;
+  subscriptionID?: unknown;
   type?: unknown;
   title?: unknown;
   thumb?: unknown;
   targetLibrarySectionID?: unknown;
   targetSectionLocationID?: unknown;
-  // Legacy flat fields — present in some Plex builds.
+  // Flat fields — present in some Plex builds / legacy responses.
   channelTitle?: unknown;
   startTime?: unknown;
   endTime?: unknown;
   startTimeOffset?: unknown;
   endTimeOffset?: unknown;
   status?: unknown;
-  // Nested objects — present in current Plex builds.
+  // Nested objects — camelCase (current) or PascalCase (older) variants.
   prefs?: DvrSubscriptionPrefs;
+  Prefs?: DvrSubscriptionPrefs;
   hints?: DvrSubscriptionHints;
+  Hints?: DvrSubscriptionHints;
   params?: DvrSubscriptionParams;
+  Params?: DvrSubscriptionParams;
 }
 
 interface SubscriptionsResponse {
@@ -158,16 +165,41 @@ function parseAiringChannels(raw: string): string {
     .join(", ");
 }
 
+// Plex field-name helpers — try all known variants so we're resilient to build differences.
+
+function subId(s: DvrSubscription): string {
+  for (const v of [s.id, s.key, s.ratingKey, s.subscriptionID]) {
+    if (v != null) return String(v);
+  }
+  return "?";
+}
+
+function subHints(s: DvrSubscription): DvrSubscriptionHints | undefined {
+  return s.hints ?? s.Hints;
+}
+
+function subPrefs(s: DvrSubscription): DvrSubscriptionPrefs | undefined {
+  return s.prefs ?? s.Prefs;
+}
+
+function subParams(s: DvrSubscription): DvrSubscriptionParams | undefined {
+  return s.params ?? s.Params;
+}
+
 function formatSubscription(s: DvrSubscription): string {
-  const id = s.id != null ? String(s.id) : "?";
-  const hintsTitle = s.hints?.title != null ? String(s.hints.title) : undefined;
+  const id = subId(s);
+  const hints = subHints(s);
+  const prefs = subPrefs(s);
+  const params = subParams(s);
+
+  const hintsTitle = hints?.title != null ? String(hints.title) : undefined;
   const rawTitle = s.title != null ? String(s.title) : undefined;
   const title = hintsTitle ?? rawTitle ?? "Unknown";
-  const isOneShot = Boolean(s.prefs?.oneShot);
+  const isOneShot = Boolean(prefs?.oneShot);
 
   const rawChannels =
-    s.params?.airingChannels != null
-      ? String(s.params.airingChannels)
+    params?.airingChannels != null
+      ? String(params.airingChannels)
       : s.channelTitle != null
         ? String(s.channelTitle)
         : "";
@@ -178,14 +210,13 @@ function formatSubscription(s: DvrSubscription): string {
     : "";
 
   const airingTimeSec =
-    s.params?.airingTimes != null
-      ? Number(s.params.airingTimes)
+    params?.airingTimes != null
+      ? Number(params.airingTimes)
       : s.startTime != null
         ? Number(s.startTime)
         : undefined;
   const endSec = s.endTime != null ? Number(s.endTime) : undefined;
-  const endOffsetMin =
-    s.prefs?.endOffsetMinutes != null ? Number(s.prefs.endOffsetMinutes) : undefined;
+  const endOffsetMin = prefs?.endOffsetMinutes != null ? Number(prefs.endOffsetMinutes) : undefined;
 
   const displayTitle = isOneShot ? title : `${title} — All Episodes`;
   const lines: string[] = [`[ID: ${id}] ${displayTitle}`];
@@ -264,27 +295,43 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         }
 
         if (args.debug) {
+          const first = subs[0] as Record<string, unknown> | undefined;
+          const keyDump = first
+            ? Object.entries(first)
+                .map(([k, v]) => {
+                  const t = v === null ? "null" : Array.isArray(v) ? "array" : typeof v;
+                  return `${k}: ${t}`;
+                })
+                .join(", ")
+            : "(empty)";
+          const hintsFirst = first?.hints ?? first?.Hints;
+          const hintsKeys =
+            hintsFirst && typeof hintsFirst === "object"
+              ? Object.keys(hintsFirst as object).join(", ")
+              : "(no hints/Hints field)";
           return {
             content: [
               {
                 type: "text",
                 text:
                   `Total subscriptions: ${subs.length}\n` +
+                  `First entry top-level keys: ${keyDump}\n` +
+                  `First entry hints keys: ${hintsKeys}\n\n` +
                   `First 2 entries (raw):\n` +
-                  JSON.stringify(subs.slice(0, 2), null, 2).slice(0, 4000),
+                  JSON.stringify(subs.slice(0, 2), null, 2).slice(0, 5000),
               },
             ],
           };
         }
 
         const oneShots = subs
-          .filter((s) => Boolean(s.prefs?.oneShot))
+          .filter((s) => Boolean(subPrefs(s)?.oneShot))
           .sort(
             (a, b) =>
-              Number(a.params?.airingTimes ?? a.startTime ?? 0) -
-              Number(b.params?.airingTimes ?? b.startTime ?? 0)
+              Number(subParams(a)?.airingTimes ?? a.startTime ?? 0) -
+              Number(subParams(b)?.airingTimes ?? b.startTime ?? 0)
           );
-        const seriesPass = subs.filter((s) => !s.prefs?.oneShot);
+        const seriesPass = subs.filter((s) => !subPrefs(s)?.oneShot);
 
         const indent = (text: string) =>
           text
@@ -334,10 +381,11 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         const byTitle = new Map<string, DvrSubscription[]>();
 
         for (const s of subs) {
-          const guid = s.hints?.guid != null ? String(s.hints.guid) : undefined;
+          const hints = subHints(s);
+          const guid = hints?.guid != null ? String(hints.guid) : undefined;
           const title =
-            s.hints?.title != null
-              ? String(s.hints.title)
+            hints?.title != null
+              ? String(hints.title)
               : s.title != null
                 ? String(s.title)
                 : undefined;
@@ -355,12 +403,16 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
 
         for (const [guid, group] of byGuid) {
           if (group.length <= 1) continue;
-          const sorted = [...group].sort((a, b) => Number(a.id ?? 0) - Number(b.id ?? 0));
-          const label = sorted[0].hints?.title != null ? String(sorted[0].hints.title) : guid;
-          const keepId = sorted[0].id != null ? String(sorted[0].id) : "?";
+          const sorted = [...group].sort(
+            (a, b) =>
+              Number(subId(a) === "?" ? 0 : subId(a)) - Number(subId(b) === "?" ? 0 : subId(b))
+          );
+          const label =
+            subHints(sorted[0])?.title != null ? String(subHints(sorted[0])!.title) : guid;
+          const keepId = subId(sorted[0]);
           const cancelIds = sorted
             .slice(1)
-            .map((s) => (s.id != null ? String(s.id) : "?"))
+            .map((s) => subId(s))
             .join(", ");
           conflicts.push(
             `${label}\n` +
@@ -372,11 +424,14 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
 
         for (const [title, group] of byTitle) {
           if (group.length <= 1) continue;
-          const sorted = [...group].sort((a, b) => Number(a.id ?? 0) - Number(b.id ?? 0));
-          const keepId = sorted[0].id != null ? String(sorted[0].id) : "?";
+          const sorted = [...group].sort(
+            (a, b) =>
+              Number(subId(a) === "?" ? 0 : subId(a)) - Number(subId(b) === "?" ? 0 : subId(b))
+          );
+          const keepId = subId(sorted[0]);
           const cancelIds = sorted
             .slice(1)
-            .map((s) => (s.id != null ? String(s.id) : "?"))
+            .map((s) => subId(s))
             .join(", ");
           conflicts.push(
             `${title} (matched by title)\n` +

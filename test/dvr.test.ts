@@ -202,6 +202,40 @@ describe("get_scheduled_recordings", () => {
     assert.match(text, /National Treasure/);
   });
 
+  it("falls back to key field when id is absent", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          { key: "99", hints: { title: "Key-Only Show" }, prefs: { oneShot: true } },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /\[ID: 99\] Key-Only Show/);
+  });
+
+  it("handles PascalCase Hints and Prefs field names", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            id: "77",
+            Hints: { title: "Pascal Show", guid: "plex://movie/pascal" },
+            Prefs: { oneShot: true, endOffsetMinutes: 3 },
+            Params: { airingChannels: "ch-abc=ABC", airingTimes: "1717200000" },
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /\[ID: 77\] Pascal Show/);
+    assert.match(text, /One-Shot Episodes:/);
+    assert.match(text, /Channel: ABC/);
+    assert.match(text, /Padding: \+3 min/);
+  });
+
   it("returns not-configured message when /media/subscriptions returns 404", async () => {
     const client = makeMockClient();
     client.setError(SUBS_PATH, 404, "Not found");
