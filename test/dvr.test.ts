@@ -289,6 +289,106 @@ describe("get_scheduled_recordings", () => {
     assert.match(text, /Channel: ABC/);
   });
 
+  it("resolves title from grandparentTitle flat field", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            id: "465",
+            type: 2,
+            title: "All Episodes",
+            airingsType: "New Airings Only",
+            grandparentTitle: "Some Show",
+            prefs: { oneShot: false },
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /\[ID: 465\] Some Show — All Episodes/);
+    assert.doesNotMatch(text, /Unknown/);
+  });
+
+  it("resolves title from Metadata.title nested field", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            id: "466",
+            type: 2,
+            title: "All Episodes",
+            Metadata: { title: "Metadata Show" },
+            prefs: { oneShot: false },
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /\[ID: 466\] Metadata Show — All Episodes/);
+    assert.doesNotMatch(text, /Unknown/);
+  });
+
+  it("adds Debug line when title cannot be resolved", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            id: "999",
+            type: 2,
+            title: "All Episodes",
+            prefs: { oneShot: false },
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /\[ID: 999\] Unknown — All Episodes/);
+    assert.match(text, /Debug: no title found/);
+  });
+
+  it('debug="unknown" returns raw JSON for unresolved subscriptions', async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          { id: "1", Directory: { title: "Known Show" }, prefs: { oneShot: false } },
+          { id: "2", type: 2, title: "All Episodes", prefs: { oneShot: false } },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_scheduled_recordings",
+      { debug: "unknown" },
+      client
+    );
+    assert.match(text, /Unresolved subscriptions \(1 of 2\)/);
+    assert.match(text, /"id": "2"/);
+    assert.doesNotMatch(text, /"id": "1"/);
+  });
+
+  it('debug="unknown" reports no unresolved when all titles resolve', async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          { id: "1", Directory: { title: "Show A" }, prefs: { oneShot: false } },
+          { id: "2", hints: { title: "Show B" }, prefs: { oneShot: false } },
+        ],
+      },
+    });
+    const { text } = await callTool(
+      register,
+      "get_scheduled_recordings",
+      { debug: "unknown" },
+      client
+    );
+    assert.match(text, /No unresolved subscriptions out of 2/);
+  });
+
   it("handles PascalCase Hints and Prefs field names", async () => {
     const client = makeMockClient();
     client.setResponse(SUBS_PATH, {
