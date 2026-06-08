@@ -880,9 +880,16 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           for (const [k, v] of Object.entries(params)) {
             debugLines.push(`  ${k} = ${v}`);
           }
+          // Use the same encoder as postForm: encode values, keep brackets literal in keys.
+          const encodedBody = Object.entries(params)
+            .map(
+              ([k, v]) =>
+                `${encodeURIComponent(k).replace(/%5B/gi, "[").replace(/%5D/gi, "]")}=${encodeURIComponent(v)}`
+            )
+            .join("&");
           debugLines.push(`Endpoint: POST ${SUBSCRIPTIONS_PATH}`);
           debugLines.push(`Content-Type: application/x-www-form-urlencoded`);
-          debugLines.push(`Raw encoded body: ${new URLSearchParams(params).toString()}`);
+          debugLines.push(`Raw encoded body: ${encodedBody}`);
           debugLines.push("=================================");
         }
 

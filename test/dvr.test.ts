@@ -923,7 +923,7 @@ describe("schedule_recording", () => {
     assert.match(text, /Endpoint: POST \/media\/subscriptions/);
     assert.match(text, /Content-Type: application\/x-www-form-urlencoded/);
     assert.match(text, /Raw encoded body:.*type=1/);
-    assert.match(text, /Raw encoded body:.*hints%5Btitle%5D=The\+Rounders/);
+    assert.match(text, /Raw encoded body:.*hints\[title\]=The%20Rounders/);
   });
 
   it("debug=true shows params and error details on POST failure", async () => {

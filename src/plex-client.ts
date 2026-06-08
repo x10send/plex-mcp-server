@@ -46,10 +46,18 @@ export class PlexClient implements IPlexClient {
 
   async postForm<T>(path: string, body: Record<string, string>): Promise<T> {
     const url = this.buildUrl(path);
+    // URLSearchParams encodes [] to %5B%5D, but Plex expects literal brackets.
+    // Encode key chars except brackets; encode all value chars normally.
+    const formBody = Object.entries(body)
+      .map(
+        ([k, v]) =>
+          `${encodeURIComponent(k).replace(/%5B/gi, "[").replace(/%5D/gi, "]")}=${encodeURIComponent(v)}`
+      )
+      .join("&");
     const res = await fetch(url, {
       method: "POST",
       headers: { ...this.headers, "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams(body).toString(),
+      body: formBody,
     });
     if (!res.ok) throw new PlexApiError(res.status, await this.errorText(res));
     const text = await res.text();
