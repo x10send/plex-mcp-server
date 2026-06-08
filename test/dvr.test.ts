@@ -289,6 +289,74 @@ describe("get_scheduled_recordings", () => {
     assert.match(text, /Channel: ABC/);
   });
 
+  it("formats movie subscription with Video.title and year (no All Episodes suffix)", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            key: "465",
+            type: 1,
+            airingsType: "New Airings Only",
+            librarySectionTitle: "Movies",
+            Video: {
+              title: "The Adventures of Robin Hood",
+              year: "1938",
+              guid: "plex://movie/5fc691381f0c59002e31ce78",
+              type: "movie",
+            },
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /\[ID: 465\] The Adventures of Robin Hood \(1938\)/);
+    assert.doesNotMatch(text, /— All Episodes/);
+    assert.doesNotMatch(text, /Unknown/);
+    assert.match(text, /Filter: New Airings Only/);
+  });
+
+  it("formats series subscription with Directory.title and All Episodes suffix", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            key: "307",
+            type: 2,
+            title: "All Episodes",
+            airingsType: "New and Repeat Airings",
+            librarySectionTitle: "TV Shows",
+            Directory: { title: "Tracker", type: "show", year: "2024" },
+            prefs: { oneShot: false },
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /\[ID: 307\] Tracker — All Episodes/);
+    assert.doesNotMatch(text, /Unknown/);
+  });
+
+  it("formats movie subscription without year when year absent", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: {
+        MediaSubscription: [
+          {
+            key: "466",
+            type: 1,
+            Video: { title: "Some Movie" },
+          },
+        ],
+      },
+    });
+    const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+    assert.match(text, /\[ID: 466\] Some Movie/);
+    assert.doesNotMatch(text, /\(\)/);
+    assert.doesNotMatch(text, /— All Episodes/);
+  });
+
   it("resolves title from grandparentTitle flat field", async () => {
     const client = makeMockClient();
     client.setResponse(SUBS_PATH, {
