@@ -884,9 +884,10 @@ describe("schedule_recording", () => {
     assert.match(text, /✗.*params\[airingChannels\].*MISSING/);
   });
 
-  it("debug=true shows POST params in output on success", async () => {
+  it("debug=true shows POST params in fallback output on success", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    // No template mock → fallback path shows raw POST params
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
@@ -898,7 +899,7 @@ describe("schedule_recording", () => {
     );
     assert.equal(isError, false);
     assert.match(text, /DEBUG/);
-    assert.match(text, /hints\[ratingKey\]/);
+    assert.match(text, /fallback/);
     assert.match(text, /Recording scheduled/);
   });
 
@@ -940,7 +941,48 @@ describe("schedule_recording", () => {
     assert.match(text, /DEBUG/);
     assert.match(text, /POST failed: HTTP 400/);
     assert.match(text, /Bad Request/);
-    assert.match(text, /hints\[ratingKey\]/);
+  });
+
+  it("uses template parameters as POST body when template has parameters field", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(TEMPLATE_PATH, {
+      MediaContainer: {
+        SubscriptionTemplate: [
+          {
+            parameters:
+              "type=1&targetLibrarySectionID=1&hints%5BratingKey%5D=plex%253A%252F%252Fmovie%252Fabc&hints%5Bguid%5D=plex%253A%252F%252Fmovie%252Fabc",
+            MediaSubscription: [{ targetLibrarySectionID: 1 }],
+          },
+        ],
+      },
+    });
+    client.setResponse("/livetv/dvrs", {
+      MediaContainer: { Dvr: [{ key: "2", Device: [{ deviceId: "105838FF", key: "1" }] }] },
+    });
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      {
+        program_id: "plex%3A%2F%2Fmovie%2Fabc",
+        channel_id: "ch-comet",
+        channel_key: "3.2 KTVKDT2 (Comet)",
+        airing_time: 1781323200,
+      },
+      client
+    );
+    const body = client.getLastPostRawBody()!;
+    assert.ok(body != null, "postRaw should have been called");
+    // Template base is preserved verbatim.
+    assert.match(body, /hints%5BratingKey%5D=plex%253A/);
+    // Scheduling extras are appended.
+    assert.match(body, /params%5BdeviceID%5D=105838FF/);
+    assert.match(body, /params%5BairingTimes%5D=1781323200/);
+    assert.match(body, /params%5BairingChannels%5D=/);
+    assert.match(body, /targetSectionLocationID=2/);
   });
 
   it("uses channel_key+channel_id override without guide lookup", async () => {

@@ -126,6 +126,9 @@ interface DvrProvidersResponse {
 interface TemplateResponse {
   MediaContainer?: {
     SubscriptionTemplate?: Array<{
+      // Pre-encoded form body Plex uses for this content — values are double-encoded
+      // so they remain percent-encoded after one form-body decode.
+      parameters?: unknown;
       MediaSubscription?: Array<Record<string, unknown>>;
     }>;
   };
@@ -712,12 +715,17 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         //    The template tells us which library the recording will go to.
         //    Silently skip on failure — the POST may still succeed without it.
         let sectionId: number | undefined;
+        let templateParamStr: string | undefined;
         let templateRaw: string | undefined;
         try {
           const tmpl = await client.get<TemplateResponse>("/media/subscriptions/template", {
             guid: programGuid,
           });
-          const sub = tmpl.MediaContainer?.SubscriptionTemplate?.[0]?.MediaSubscription?.[0];
+          const template = tmpl.MediaContainer?.SubscriptionTemplate?.[0];
+          if (template?.parameters != null) {
+            templateParamStr = String(template.parameters);
+          }
+          const sub = template?.MediaSubscription?.[0];
           if (sub?.targetLibrarySectionID != null) {
             sectionId = Number(sub.targetLibrarySectionID);
           }
@@ -725,7 +733,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
             templateRaw = JSON.stringify(tmpl.MediaContainer, null, 2).slice(0, 3000);
           }
         } catch {
-          // Continue without section ID.
+          // Continue without template.
         }
 
         // 3.5. Guide lookup — fetch airing time and channel display string using channel_id.
@@ -880,28 +888,53 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
             const ok = value != null && value !== "";
             debugLines.push(`  ${ok ? "✓" : "✗"} ${field}${ok ? "" : " — MISSING"}`);
           }
-          debugLines.push("POST params:");
-          for (const [k, v] of Object.entries(params)) {
-            debugLines.push(`  ${k} = ${v}`);
+          if (templateParamStr) {
+            debugLines.push(`Body source: subscription template + scheduling extras`);
+          } else {
+            debugLines.push("POST params (fallback — no template):");
+            for (const [k, v] of Object.entries(params)) {
+              debugLines.push(`  ${k} = ${v}`);
+            }
           }
-          // Use the same encoder as postForm: encode values, keep brackets literal in keys.
-          const encodedBody = Object.entries(params)
+        }
+
+        // 9. POST the subscription.
+        //    If the template returned a pre-encoded `parameters` string, use it as the body
+        //    and append our scheduling-specific fields. Template values are double-encoded
+        //    so GUIDs remain percent-encoded after Plex's one form-body decode.
+        //    Fall back to building from scratch when the template is unavailable.
+        let postBody: string;
+        if (templateParamStr) {
+          const extras: string[] = [`targetSectionLocationID=${dvrSectionLocationId ?? ""}`];
+          if (dvrDeviceId) extras.push(`params%5BdeviceID%5D=${encodeURIComponent(dvrDeviceId)}`);
+          if (dvrDeviceKey)
+            extras.push(`params%5BdvrDeviceID%5D=${encodeURIComponent(dvrDeviceKey)}`);
+          if (resolvedAiringChannels != null)
+            extras.push(`params%5BairingChannels%5D=${encodeURIComponent(resolvedAiringChannels)}`);
+          if (resolvedAiringTime != null)
+            extras.push(`params%5BairingTimes%5D=${encodeURIComponent(resolvedAiringTime)}`);
+          postBody = [templateParamStr, ...extras].join("&");
+        } else {
+          postBody = Object.entries(params)
             .map(
               ([k, v]) =>
                 `${encodeURIComponent(k).replace(/%5B/gi, "[").replace(/%5D/gi, "]")}=${encodeURIComponent(v)}`
             )
             .join("&");
+        }
+
+        if (args.debug) {
           debugLines.push(`Endpoint: POST ${SUBSCRIPTIONS_PATH}`);
           debugLines.push(`Content-Type: application/x-www-form-urlencoded`);
-          debugLines.push(`Raw encoded body: ${encodedBody}`);
+          debugLines.push(`Raw encoded body: ${postBody}`);
           debugLines.push("=================================");
         }
 
-        // 9. POST the subscription as form-encoded body.
-        //    Plex requires application/x-www-form-urlencoded, not query params.
         let data: SubscriptionsResponse;
         try {
-          data = await client.postForm<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
+          data = templateParamStr
+            ? await client.postRaw<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, postBody)
+            : await client.postForm<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
         } catch (err) {
           if (args.debug && err instanceof PlexApiError) {
             return {
