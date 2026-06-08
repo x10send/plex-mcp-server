@@ -845,7 +845,7 @@ describe("schedule_recording", () => {
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
     const params = client.getLastPostParams();
-    assert.equal(params?.["targetSectionLocationID"], "");
+    assert.equal(params?.["targetSectionLocationID"], "2");
     assert.equal(params?.["targetLibrarySectionID"], "2");
     assert.equal(params?.["params[deviceID]"], "105838FF");
     assert.equal(params?.["params[dvrDeviceID]"], "1");
@@ -863,6 +863,25 @@ describe("schedule_recording", () => {
     assert.equal(params?.["targetSectionLocationID"], "");
     assert.equal(params?.["params[deviceID]"], undefined);
     assert.equal(params?.["params[dvrDeviceID]"], undefined);
+  });
+
+  it("debug=true pre-flight check marks missing fields with ✗", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    // No /livetv/dvrs → deviceID and dvrDeviceID will be missing
+    // No channel_id → airingChannels and airingTimes will be missing
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    const { text } = await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", debug: true },
+      client
+    );
+    assert.match(text, /Pre-flight check/);
+    assert.match(text, /✗.*params\[deviceID\].*MISSING/);
+    assert.match(text, /✗.*params\[airingChannels\].*MISSING/);
   });
 
   it("debug=true shows POST params in output on success", async () => {

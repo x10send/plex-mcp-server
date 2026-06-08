@@ -817,7 +817,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         // 7. Build the POST params.
         const params: Record<string, string> = {
           type: contentType,
-          targetSectionLocationID: "",
+          targetSectionLocationID: dvrSectionLocationId ?? "",
           includeGrabs: "1",
           "params[mediaProviderID]": String(providerId),
           "params[libraryType]": libraryType,
@@ -862,6 +862,19 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           debugLines.push(`dvrDeviceId: ${dvrDeviceId ?? "not found"}`);
           debugLines.push(`dvrDeviceKey: ${dvrDeviceKey ?? "not found"}`);
           if (dvrRaw) debugLines.push(`/livetv/dvrs response:\n${dvrRaw}`);
+          debugLines.push("Pre-flight check:");
+          const required: Array<[string, string | undefined]> = [
+            ["targetLibrarySectionID", params["targetLibrarySectionID"]],
+            ["targetSectionLocationID", params["targetSectionLocationID"]],
+            ["params[deviceID]", params["params[deviceID]"]],
+            ["params[dvrDeviceID]", params["params[dvrDeviceID]"]],
+            ["params[airingChannels]", params["params[airingChannels]"]],
+            ["params[airingTimes]", params["params[airingTimes]"]],
+          ];
+          for (const [field, value] of required) {
+            const ok = value != null && value !== "";
+            debugLines.push(`  ${ok ? "✓" : "✗"} ${field}${ok ? "" : " — MISSING"}`);
+          }
           debugLines.push("POST params:");
           for (const [k, v] of Object.entries(params)) {
             debugLines.push(`  ${k} = ${v}`);
