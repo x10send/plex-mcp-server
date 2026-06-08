@@ -913,16 +913,12 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         //    Fall back to building from scratch when the template is unavailable.
         let postBody: string;
         if (templateParamStr) {
-          // Template already contains hints[*], params[airingChannels], params[airingTimes],
-          // params[libraryType], params[mediaProviderID] — don't duplicate them.
-          // Plex applies prefs and picks the DVR device from the library section server-side;
-          // only append the target location fields.
-          const extras: string[] = [
-            `type=${contentType}`,
-            `targetSectionLocationID=${dvrSectionLocationId ?? ""}`,
-          ];
+          // Template already contains all content-specific data including hints[type].
+          // Only append targetLibrarySectionID — Plex derives everything else from the template
+          // and the library section's own configuration.
+          const extras: string[] = [];
           if (sectionId !== undefined) extras.push(`targetLibrarySectionID=${sectionId}`);
-          postBody = [templateParamStr, ...extras].join("&");
+          postBody = extras.length ? [templateParamStr, ...extras].join("&") : templateParamStr;
         } else {
           postBody = Object.entries(params)
             .map(
