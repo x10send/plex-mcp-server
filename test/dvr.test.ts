@@ -1009,9 +1009,10 @@ describe("schedule_recording", () => {
 // ── cancel_recording ──────────────────────────────────────────────────────────
 
 describe("cancel_recording", () => {
-  it("cancels a recording successfully", async () => {
+  it("cancels a recording and shows Verified when subscription is gone", async () => {
     const client = makeMockClient();
     client.setResponse(`${SUBS_PATH}/42`, { MediaContainer: {} });
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [] } });
     const { text, isError } = await callTool(
       register,
       "cancel_recording",
@@ -1021,6 +1022,89 @@ describe("cancel_recording", () => {
     assert.equal(isError, false);
     assert.match(text, /42/);
     assert.match(text, /cancelled/);
+    assert.match(text, /Verified: removed/);
+  });
+
+  it("shows title when Plex echoes back the deleted subscription", async () => {
+    const client = makeMockClient();
+    client.setResponse(`${SUBS_PATH}/42`, {
+      MediaContainer: {
+        MediaSubscription: [{ id: "42", Directory: { title: "Tracker" } }],
+      },
+    });
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [] } });
+    const { text } = await callTool(
+      register,
+      "cancel_recording",
+      { subscription_id: "42" },
+      client
+    );
+    assert.match(text, /Title: Tracker/);
+    assert.match(text, /Verified: removed/);
+  });
+
+  it("shows Warning when subscription still appears after cancel", async () => {
+    const client = makeMockClient();
+    client.setResponse(`${SUBS_PATH}/42`, { MediaContainer: {} });
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [{ id: "42" }] },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "cancel_recording",
+      { subscription_id: "42" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /cancelled/);
+    assert.match(text, /Warning.*still appears/);
+  });
+
+  it("omits Verified line when verification GET fails", async () => {
+    const client = makeMockClient();
+    client.setResponse(`${SUBS_PATH}/42`, { MediaContainer: {} });
+    // No mock for SUBS_PATH → verification throws, caught silently
+    const { text, isError } = await callTool(
+      register,
+      "cancel_recording",
+      { subscription_id: "42" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /cancelled/);
+    assert.doesNotMatch(text, /Verified/);
+    assert.doesNotMatch(text, /Warning/);
+  });
+
+  it("debug=true includes endpoint, response, and verification details", async () => {
+    const client = makeMockClient();
+    client.setResponse(`${SUBS_PATH}/42`, { MediaContainer: {} });
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [] } });
+    const { text, isError } = await callTool(
+      register,
+      "cancel_recording",
+      { subscription_id: "42", debug: true },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /DEBUG/);
+    assert.match(text, /DELETE.*\/media\/subscriptions\/42/);
+    assert.match(text, /Verification GET/);
+    assert.match(text, /cancelled/);
+  });
+
+  it("debug=true returns structured error details on DELETE failure", async () => {
+    const client = makeMockClient();
+    client.setError(`${SUBS_PATH}/42`, 404, "Not found");
+    const { text, isError } = await callTool(
+      register,
+      "cancel_recording",
+      { subscription_id: "42", debug: true },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /DEBUG/);
+    assert.match(text, /HTTP 404/);
   });
 
   it("rejects non-numeric subscription IDs (path traversal guard)", async () => {
@@ -1045,7 +1129,7 @@ describe("cancel_recording", () => {
     assert.equal(isError, true);
   });
 
-  it("returns error on API failure (e.g. subscription not found)", async () => {
+  it("returns error on API failure (non-debug, e.g. subscription not found)", async () => {
     const client = makeMockClient();
     client.setError(`${SUBS_PATH}/999`, 404, "Subscription not found");
     const { isError, text } = await callTool(

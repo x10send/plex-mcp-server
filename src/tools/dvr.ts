@@ -956,16 +956,89 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         .string()
         .regex(/^\d+$/, "Subscription ID must be a positive integer")
         .describe("Subscription ID from get_scheduled_recordings or schedule_recording"),
+      debug: z
+        .union([z.boolean(), z.string().transform((v) => v === "true")])
+        .optional()
+        .describe("Show the DELETE endpoint, Plex response, and verification details."),
     },
     async (args) => {
       try {
-        await client.delete<unknown>(`${SUBSCRIPTIONS_PATH}/${args.subscription_id}`);
+        const endpoint = `${SUBSCRIPTIONS_PATH}/${args.subscription_id}`;
+        const debugLines: string[] = [];
+
+        if (args.debug) {
+          debugLines.push("=== DEBUG: cancel_recording ===");
+          debugLines.push(`Endpoint: DELETE ${endpoint}`);
+        }
+
+        // Issue DELETE — Plex sometimes echoes the deleted subscription back.
+        let deleteResponse: SubscriptionsResponse | undefined;
+        try {
+          deleteResponse = await client.delete<SubscriptionsResponse>(endpoint);
+        } catch (err) {
+          if (args.debug && err instanceof PlexApiError) {
+            debugLines.push(`Delete response: HTTP ${err.status} — ${err.message}`);
+            debugLines.push("=================================");
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    debugLines.join("\n") +
+                    `\n\nFailed to cancel subscription ${args.subscription_id}: HTTP ${err.status} — ${err.message}`,
+                },
+              ],
+            };
+          }
+          throw err;
+        }
+
+        if (args.debug) {
+          const raw =
+            deleteResponse != null
+              ? JSON.stringify(deleteResponse, null, 2).slice(0, 1000)
+              : "(empty)";
+          debugLines.push(`Delete response: ${raw}`);
+        }
+
+        // Try to recover the title from the DELETE echo-back.
+        const deletedSubs = normaliseSubscriptions(
+          deleteResponse?.MediaContainer?.MediaSubscription
+        );
+        const title = deletedSubs[0] ? resolveSubscriptionTitle(deletedSubs[0]) : undefined;
+
+        // Verify removal by re-fetching the subscription list.
+        let verified: boolean | undefined;
+        try {
+          const remaining = await client.get<SubscriptionsResponse>(SUBSCRIPTIONS_PATH);
+          const remainingSubs = normaliseSubscriptions(
+            remaining?.MediaContainer?.MediaSubscription
+          );
+          verified = !remainingSubs.some((s) => subId(s) === args.subscription_id);
+          if (args.debug) {
+            debugLines.push(`Verification GET: ${SUBSCRIPTIONS_PATH}`);
+            debugLines.push(`Subscription ${args.subscription_id} still in list: ${!verified}`);
+          }
+        } catch {
+          if (args.debug) debugLines.push("Verification: could not fetch subscription list");
+        }
+
+        if (args.debug) debugLines.push("=================================");
+
+        const lines = [`Recording subscription ${args.subscription_id} cancelled.`];
+        if (title) lines.push(`  Title: ${title}`);
+        if (verified === true) {
+          lines.push(`  Verified: removed from subscription list`);
+        } else if (verified === false) {
+          lines.push(
+            `  Warning: subscription still appears in list — Plex may need a moment to update`
+          );
+        }
+
+        const body = lines.join("\n");
         return {
           content: [
-            {
-              type: "text",
-              text: `Recording subscription ${args.subscription_id} cancelled.`,
-            },
+            { type: "text", text: args.debug ? debugLines.join("\n") + "\n\n" + body : body },
           ],
         };
       } catch (err) {
