@@ -126,10 +126,13 @@ interface DvrProvidersResponse {
 interface TemplateResponse {
   MediaContainer?: {
     SubscriptionTemplate?: Array<{
-      // Pre-encoded form body Plex uses for this content — values are double-encoded
-      // so they remain percent-encoded after one form-body decode.
-      parameters?: unknown;
-      MediaSubscription?: Array<Record<string, unknown>>;
+      MediaSubscription?: Array<{
+        // Pre-encoded form body — values are double-encoded so GUIDs remain
+        // percent-encoded after Plex's one form-body decode.
+        parameters?: unknown;
+        targetLibrarySectionID?: unknown;
+        [key: string]: unknown;
+      }>;
     }>;
   };
 }
@@ -721,11 +724,10 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           const tmpl = await client.get<TemplateResponse>("/media/subscriptions/template", {
             guid: programGuid,
           });
-          const template = tmpl.MediaContainer?.SubscriptionTemplate?.[0];
-          if (template?.parameters != null) {
-            templateParamStr = String(template.parameters);
+          const sub = tmpl.MediaContainer?.SubscriptionTemplate?.[0]?.MediaSubscription?.[0];
+          if (sub?.parameters != null) {
+            templateParamStr = String(sub.parameters);
           }
-          const sub = template?.MediaSubscription?.[0];
           if (sub?.targetLibrarySectionID != null) {
             sectionId = Number(sub.targetLibrarySectionID);
           }
@@ -888,9 +890,15 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
             const ok = value != null && value !== "";
             debugLines.push(`  ${ok ? "✓" : "✗"} ${field}${ok ? "" : " — MISSING"}`);
           }
+          debugLines.push(`Template found: ${templateParamStr != null}`);
           if (templateParamStr) {
-            debugLines.push(`Body source: subscription template + scheduling extras`);
+            debugLines.push(
+              `Template path used: SubscriptionTemplate[0].MediaSubscription[0].parameters`
+            );
+            debugLines.push(`Body source: template`);
+            debugLines.push(`Raw template parameters:\n${templateParamStr}`);
           } else {
+            debugLines.push(`Body source: fallback`);
             debugLines.push("POST params (fallback — no template):");
             for (const [k, v] of Object.entries(params)) {
               debugLines.push(`  ${k} = ${v}`);
@@ -905,14 +913,32 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         //    Fall back to building from scratch when the template is unavailable.
         let postBody: string;
         if (templateParamStr) {
-          const extras: string[] = [`targetSectionLocationID=${dvrSectionLocationId ?? ""}`];
+          // Template already contains hints[*], params[airingChannels], params[airingTimes],
+          // params[libraryType], params[mediaProviderID] — don't duplicate them.
+          // Append only fields absent from the template.
+          const extras: string[] = [
+            `type=${contentType}`,
+            `targetSectionLocationID=${dvrSectionLocationId ?? ""}`,
+          ];
+          if (sectionId !== undefined) extras.push(`targetLibrarySectionID=${sectionId}`);
+          extras.push(
+            `prefs%5BonlyNewAirings%5D=1`,
+            `prefs%5BminVideoQuality%5D=0`,
+            `prefs%5BreplaceLowerQuality%5D=false`,
+            `prefs%5BrecordPartials%5D=true`,
+            `prefs%5BstartOffsetMinutes%5D=${startMin}`,
+            `prefs%5BendOffsetMinutes%5D=${endMin}`,
+            `prefs%5BstartTimeslot%5D=-1`,
+            `prefs%5BcomskipEnabled%5D=-1`,
+            `prefs%5BcomskipMethod%5D=1`,
+            `prefs%5BoneShot%5D=${oneShot}`,
+            `prefs%5BremoteMedia%5D=false`,
+            `prefs%5BautoDeletionItemPolicyUnwatchedLibrary%5D=0`,
+            `prefs%5BautoDeletionItemPolicyWatchedLibrary%5D=0`
+          );
           if (dvrDeviceId) extras.push(`params%5BdeviceID%5D=${encodeURIComponent(dvrDeviceId)}`);
           if (dvrDeviceKey)
             extras.push(`params%5BdvrDeviceID%5D=${encodeURIComponent(dvrDeviceKey)}`);
-          if (resolvedAiringChannels != null)
-            extras.push(`params%5BairingChannels%5D=${encodeURIComponent(resolvedAiringChannels)}`);
-          if (resolvedAiringTime != null)
-            extras.push(`params%5BairingTimes%5D=${encodeURIComponent(resolvedAiringTime)}`);
           postBody = [templateParamStr, ...extras].join("&");
         } else {
           postBody = Object.entries(params)
@@ -926,7 +952,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (args.debug) {
           debugLines.push(`Endpoint: POST ${SUBSCRIPTIONS_PATH}`);
           debugLines.push(`Content-Type: application/x-www-form-urlencoded`);
-          debugLines.push(`Raw encoded body: ${postBody}`);
+          debugLines.push(`Final raw encoded body: ${postBody}`);
           debugLines.push("=================================");
         }
 

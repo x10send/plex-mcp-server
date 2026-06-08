@@ -923,8 +923,8 @@ describe("schedule_recording", () => {
     assert.equal(isError, false);
     assert.match(text, /Endpoint: POST \/media\/subscriptions/);
     assert.match(text, /Content-Type: application\/x-www-form-urlencoded/);
-    assert.match(text, /Raw encoded body:.*type=1/);
-    assert.match(text, /Raw encoded body:.*hints\[title\]=The%20Rounders/);
+    assert.match(text, /Final raw encoded body:.*type=1/);
+    assert.match(text, /Final raw encoded body:.*hints\[title\]=The%20Rounders/);
   });
 
   it("debug=true shows params and error details on POST failure", async () => {
@@ -946,13 +946,18 @@ describe("schedule_recording", () => {
   it("uses template parameters as POST body when template has parameters field", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    // parameters lives inside MediaSubscription[0], not as a sibling of it.
     client.setResponse(TEMPLATE_PATH, {
       MediaContainer: {
         SubscriptionTemplate: [
           {
-            parameters:
-              "type=1&targetLibrarySectionID=1&hints%5BratingKey%5D=plex%253A%252F%252Fmovie%252Fabc&hints%5Bguid%5D=plex%253A%252F%252Fmovie%252Fabc",
-            MediaSubscription: [{ targetLibrarySectionID: 1 }],
+            MediaSubscription: [
+              {
+                parameters:
+                  "hints%5BratingKey%5D=plex%253A%252F%252Fmovie%252Fabc&hints%5Bguid%5D=plex%253A%252F%252Fmovie%252Fabc&params%5BairingChannels%5D=ch-comet%253D3.2&params%5BairingTimes%5D=1781323200&params%5BlibraryType%5D=1&params%5BmediaProviderID%5D=10",
+                targetLibrarySectionID: 1,
+              },
+            ],
           },
         ],
       },
@@ -968,6 +973,7 @@ describe("schedule_recording", () => {
       "schedule_recording",
       {
         program_id: "plex%3A%2F%2Fmovie%2Fabc",
+        program_type: "movie",
         channel_id: "ch-comet",
         channel_key: "3.2 KTVKDT2 (Comet)",
         airing_time: 1781323200,
@@ -978,11 +984,15 @@ describe("schedule_recording", () => {
     assert.ok(body != null, "postRaw should have been called");
     // Template base is preserved verbatim.
     assert.match(body, /hints%5BratingKey%5D=plex%253A/);
-    // Scheduling extras are appended.
-    assert.match(body, /params%5BdeviceID%5D=105838FF/);
+    // airingChannels and airingTimes come from the template (not re-appended).
     assert.match(body, /params%5BairingTimes%5D=1781323200/);
-    assert.match(body, /params%5BairingChannels%5D=/);
+    assert.match(body, /params%5BairingChannels%5D=ch-comet/);
+    // Required extras are appended.
+    assert.match(body, /params%5BdeviceID%5D=105838FF/);
     assert.match(body, /targetSectionLocationID=2/);
+    assert.match(body, /&type=1&/);
+    assert.match(body, /prefs%5BoneShot%5D=true/);
+    assert.match(body, /targetLibrarySectionID=1/);
   });
 
   it("uses channel_key+channel_id override without guide lookup", async () => {
