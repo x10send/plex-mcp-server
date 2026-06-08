@@ -739,7 +739,7 @@ describe("schedule_recording", () => {
       { program_id: "plex%3A%2F%2Fepisode%2Fabc", program_title: "My Show", channel_id: "ch-tnt" },
       client
     );
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["hints[ratingKey]"], "plex://episode/abc");
     assert.equal(params?.["hints[guid]"], "plex://episode/abc");
     assert.equal(params?.["hints[title]"], "My Show");
@@ -753,7 +753,7 @@ describe("schedule_recording", () => {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["hints[title]"], undefined);
   });
 
@@ -775,7 +775,7 @@ describe("schedule_recording", () => {
       },
       client
     );
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["prefs[startOffsetMinutes]"], "1");
     assert.equal(params?.["prefs[endOffsetMinutes]"], "2");
   });
@@ -792,7 +792,7 @@ describe("schedule_recording", () => {
       { program_id: "1001", program_title: "Movie" },
       client
     );
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["prefs[startOffsetMinutes]"], "0");
     assert.equal(params?.["prefs[endOffsetMinutes]"], "5");
   });
@@ -810,7 +810,7 @@ describe("schedule_recording", () => {
       { program_id: "1001", program_title: "Movie" },
       client
     );
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["targetLibrarySectionID"], "6");
     assert.equal(params?.["params[mediaProviderID]"], "10");
   });
@@ -828,7 +828,7 @@ describe("schedule_recording", () => {
       { program_id: "1001", program_title: "Movie" },
       client
     );
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["targetLibrarySectionID"], undefined);
   });
 
@@ -844,7 +844,7 @@ describe("schedule_recording", () => {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["targetSectionLocationID"], "2");
     assert.equal(params?.["targetLibrarySectionID"], "2");
     assert.equal(params?.["params[deviceID]"], "105838FF");
@@ -859,7 +859,7 @@ describe("schedule_recording", () => {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["targetSectionLocationID"], "");
     assert.equal(params?.["params[deviceID]"], undefined);
     assert.equal(params?.["params[dvrDeviceID]"], undefined);
@@ -902,6 +902,30 @@ describe("schedule_recording", () => {
     assert.match(text, /Recording scheduled/);
   });
 
+  it("debug=true shows endpoint, content-type, and raw encoded body", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    const { text, isError } = await callTool(
+      register,
+      "schedule_recording",
+      {
+        program_id: "plex%3A%2F%2Fmovie%2Fabc",
+        program_title: "The Rounders",
+        program_type: "movie",
+        debug: true,
+      },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /Endpoint: POST \/media\/subscriptions/);
+    assert.match(text, /Content-Type: application\/x-www-form-urlencoded/);
+    assert.match(text, /Raw encoded body:.*type=1/);
+    assert.match(text, /Raw encoded body:.*hints%5Btitle%5D=The\+Rounders/);
+  });
+
   it("debug=true shows params and error details on POST failure", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
@@ -936,7 +960,7 @@ describe("schedule_recording", () => {
       },
       client
     );
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["params[airingChannels]"], "ch-abc123=3.1 KTVKDT (Independent)");
     assert.equal(params?.["params[airingTimes]"], "1780905600");
   });
@@ -969,7 +993,7 @@ describe("schedule_recording", () => {
       { program_id: "plex%3A%2F%2Fepisode%2Fabc", channel_id: "ch-tnt" },
       client
     );
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["params[airingChannels]"], "ch-tnt=44.1 KPHELD (Independent)");
     assert.equal(params?.["params[airingTimes]"], "1717200000");
   });
@@ -981,7 +1005,7 @@ describe("schedule_recording", () => {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["params[airingChannels]"], undefined);
     assert.equal(params?.["params[airingTimes]"], undefined);
   });
@@ -998,7 +1022,7 @@ describe("schedule_recording", () => {
       { program_id: "5001", program_title: "Maverick", program_type: "movie" },
       client
     );
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["type"], "1");
     assert.equal(params?.["hints[type]"], "1");
     assert.equal(params?.["params[libraryType]"], "1");
@@ -1017,7 +1041,7 @@ describe("schedule_recording", () => {
       { program_id: "3001", program_title: "Highlander", program_type: "show" },
       client
     );
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["type"], "2");
     assert.equal(params?.["hints[type]"], "2");
     assert.equal(params?.["params[libraryType]"], "2");
@@ -1036,7 +1060,7 @@ describe("schedule_recording", () => {
       { program_id: "2001", program_title: "Breaking Bad", program_type: "episode" },
       client
     );
-    const params = client.getLastPostParams();
+    const params = client.getLastPostFormParams();
     assert.equal(params?.["type"], "2");
     assert.equal(params?.["hints[type]"], "2");
     assert.equal(params?.["params[libraryType]"], "2");

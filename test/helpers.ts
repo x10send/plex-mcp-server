@@ -9,6 +9,7 @@ export interface MockPlexClient extends IPlexClient {
   setResponse(path: string, response: AnyRecord): void;
   setError(path: string, status: number, message: string): void;
   getLastPostParams(): Record<string, string> | undefined;
+  getLastPostFormParams(): Record<string, string> | undefined;
   getLastGetParams(): Record<string, string> | undefined;
 }
 
@@ -16,6 +17,7 @@ export function makeMockClient(): MockPlexClient {
   const responses = new Map<string, AnyRecord>();
   const errors = new Map<string, { status: number; message: string }>();
   let lastPostParams: Record<string, string> | undefined;
+  let lastPostFormParams: Record<string, string> | undefined;
   let lastGetParams: Record<string, string> | undefined;
 
   return {
@@ -27,6 +29,9 @@ export function makeMockClient(): MockPlexClient {
     },
     getLastPostParams() {
       return lastPostParams;
+    },
+    getLastPostFormParams() {
+      return lastPostFormParams;
     },
     getLastGetParams() {
       return lastGetParams;
@@ -54,6 +59,19 @@ export function makeMockClient(): MockPlexClient {
       const res = responses.get(path);
       if (res === undefined) {
         throw new Error(`MockPlexClient: no response configured for POST ${path}`);
+      }
+      return res as T;
+    },
+    async postForm<T>(path: string, body: Record<string, string>): Promise<T> {
+      lastPostFormParams = body;
+      const err = errors.get(path);
+      if (err) {
+        const { PlexApiError } = await import("../src/plex-client.js");
+        throw new PlexApiError(err.status, err.message);
+      }
+      const res = responses.get(path);
+      if (res === undefined) {
+        throw new Error(`MockPlexClient: no response configured for POST (form) ${path}`);
       }
       return res as T;
     },

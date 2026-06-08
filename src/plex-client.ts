@@ -7,6 +7,7 @@ export interface PlexClientConfig {
 export interface IPlexClient {
   get<T>(path: string, params?: Record<string, string>): Promise<T>;
   post<T>(path: string, params?: Record<string, string>): Promise<T>;
+  postForm<T>(path: string, body: Record<string, string>): Promise<T>;
   delete<T>(path: string): Promise<T>;
 }
 
@@ -41,6 +42,18 @@ export class PlexClient implements IPlexClient {
 
   async post<T>(path: string, params?: Record<string, string>): Promise<T> {
     return this.request<T>("POST", path, params);
+  }
+
+  async postForm<T>(path: string, body: Record<string, string>): Promise<T> {
+    const url = this.buildUrl(path);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { ...this.headers, "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams(body).toString(),
+    });
+    if (!res.ok) throw new PlexApiError(res.status, await this.errorText(res));
+    const text = await res.text();
+    return (text.trim() ? JSON.parse(text) : undefined) as T;
   }
 
   async delete<T>(path: string): Promise<T> {

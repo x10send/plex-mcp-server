@@ -880,13 +880,17 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           for (const [k, v] of Object.entries(params)) {
             debugLines.push(`  ${k} = ${v}`);
           }
+          debugLines.push(`Endpoint: POST ${SUBSCRIPTIONS_PATH}`);
+          debugLines.push(`Content-Type: application/x-www-form-urlencoded`);
+          debugLines.push(`Raw encoded body: ${new URLSearchParams(params).toString()}`);
           debugLines.push("=================================");
         }
 
-        // 9. POST the subscription.
+        // 9. POST the subscription as form-encoded body.
+        //    Plex requires application/x-www-form-urlencoded, not query params.
         let data: SubscriptionsResponse;
         try {
-          data = await client.post<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
+          data = await client.postForm<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
         } catch (err) {
           if (args.debug && err instanceof PlexApiError) {
             return {
