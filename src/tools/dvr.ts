@@ -126,7 +126,7 @@ interface DvrProvidersResponse {
 interface TemplateResponse {
   MediaContainer?: {
     SubscriptionTemplate?: Array<{
-      MediaSubscription?: Array<{ targetLibrarySectionID?: unknown }>;
+      MediaSubscription?: Array<Record<string, unknown>>;
     }>;
   };
 }
@@ -712,6 +712,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         //    The template tells us which library the recording will go to.
         //    Silently skip on failure — the POST may still succeed without it.
         let sectionId: number | undefined;
+        let templateRaw: string | undefined;
         try {
           const tmpl = await client.get<TemplateResponse>("/media/subscriptions/template", {
             guid: programGuid,
@@ -719,6 +720,9 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           const sub = tmpl.MediaContainer?.SubscriptionTemplate?.[0]?.MediaSubscription?.[0];
           if (sub?.targetLibrarySectionID != null) {
             sectionId = Number(sub.targetLibrarySectionID);
+          }
+          if (args.debug) {
+            templateRaw = JSON.stringify(tmpl.MediaContainer, null, 2).slice(0, 3000);
           }
         } catch {
           // Continue without section ID.
@@ -820,7 +824,6 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         const params: Record<string, string> = {
           type: contentType,
           targetSectionLocationID: dvrSectionLocationId ?? "",
-          includeGrabs: "1",
           "params[mediaProviderID]": String(providerId),
           "params[libraryType]": libraryType,
           "prefs[onlyNewAirings]": "1",
@@ -862,6 +865,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           debugLines.push(`dvrSectionLocationId: ${dvrSectionLocationId ?? "not found"}`);
           debugLines.push(`dvrDeviceId: ${dvrDeviceId ?? "not found"}`);
           debugLines.push(`dvrDeviceKey: ${dvrDeviceKey ?? "not found"}`);
+          if (templateRaw) debugLines.push(`Template response:\n${templateRaw}`);
           if (dvrRaw) debugLines.push(`/livetv/dvrs response:\n${dvrRaw}`);
           debugLines.push("Pre-flight check:");
           const required: Array<[string, string | undefined]> = [
