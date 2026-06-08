@@ -906,40 +906,20 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           }
         }
 
-        // 9. POST the subscription.
-        //    If the template returned a pre-encoded `parameters` string, use it as the body
-        //    and append our scheduling-specific fields. Template values are double-encoded
-        //    so GUIDs remain percent-encoded after Plex's one form-body decode.
-        //    Fall back to building from scratch when the template is unavailable.
-        let postBody: string;
-        if (templateParamStr) {
-          // Template already contains all content-specific data including hints[type].
-          // Only append targetLibrarySectionID — Plex derives everything else from the template
-          // and the library section's own configuration.
-          const extras: string[] = [];
-          if (sectionId !== undefined) extras.push(`targetLibrarySectionID=${sectionId}`);
-          postBody = extras.length ? [templateParamStr, ...extras].join("&") : templateParamStr;
-        } else {
-          postBody = Object.entries(params)
-            .map(
-              ([k, v]) =>
-                `${encodeURIComponent(k).replace(/%5B/gi, "[").replace(/%5D/gi, "]")}=${encodeURIComponent(v)}`
-            )
-            .join("&");
-        }
-
+        // 9. POST the subscription as URL query parameters (empty body).
+        //    Plex's internal API passes all data as query string params even for POST.
         if (args.debug) {
-          debugLines.push(`Endpoint: POST ${SUBSCRIPTIONS_PATH}`);
-          debugLines.push(`Content-Type: application/x-www-form-urlencoded`);
-          debugLines.push(`Final raw encoded body: ${postBody}`);
+          debugLines.push(`Endpoint: POST ${SUBSCRIPTIONS_PATH} (params as URL query string)`);
+          debugLines.push(`POST params:`);
+          for (const [k, v] of Object.entries(params)) {
+            debugLines.push(`  ${k} = ${v}`);
+          }
           debugLines.push("=================================");
         }
 
         let data: SubscriptionsResponse;
         try {
-          data = templateParamStr
-            ? await client.postRaw<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, postBody)
-            : await client.postForm<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
+          data = await client.post<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
         } catch (err) {
           if (args.debug && err instanceof PlexApiError) {
             return {
