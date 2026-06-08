@@ -782,10 +782,12 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           }
         }
 
-        // 4. Use type=2 for all subscriptions — matches confirmed-working HAR.
+        // 4. Type depends on content: 1=movie, 2=TV/episode.
+        //    Confirmed from stored Plex subscriptions: movie rules have type=1, TV rules have type=2.
         //    One-shot vs season pass is differentiated by prefs[oneShot], not type.
-        const contentType = "2";
-        const libraryType = "2";
+        const isMovie = args.program_type === "movie";
+        const contentType = isMovie ? "1" : "2";
+        const libraryType = isMovie ? "1" : "2";
         const oneShot = args.program_type === "show" ? "false" : "true";
 
         // 5. Convert second-based offsets to minutes (Plex API uses minutes).
@@ -827,7 +829,6 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           "prefs[recordPartials]": "true",
           "prefs[startOffsetMinutes]": String(startMin),
           "prefs[endOffsetMinutes]": String(endMin),
-          "prefs[lineupChannel]": "",
           "prefs[startTimeslot]": "-1",
           "prefs[comskipEnabled]": "-1",
           "prefs[comskipMethod]": "1",

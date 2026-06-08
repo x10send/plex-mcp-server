@@ -986,7 +986,26 @@ describe("schedule_recording", () => {
     assert.equal(params?.["params[airingTimes]"], undefined);
   });
 
-  it("uses show content type (2) and oneShot=false for program_type=show", async () => {
+  it("uses type=1 and oneShot=true for program_type=movie", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "5001", program_title: "Maverick", program_type: "movie" },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.["type"], "1");
+    assert.equal(params?.["hints[type]"], "1");
+    assert.equal(params?.["params[libraryType]"], "1");
+    assert.equal(params?.["prefs[oneShot]"], "true");
+  });
+
+  it("uses type=2 and oneShot=false for program_type=show", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
@@ -1005,7 +1024,7 @@ describe("schedule_recording", () => {
     assert.equal(params?.["prefs[oneShot]"], "false");
   });
 
-  it("uses type=2 for program_type=episode — matches confirmed-working HAR", async () => {
+  it("uses type=2 and oneShot=true for program_type=episode", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
