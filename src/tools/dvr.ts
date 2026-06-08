@@ -915,27 +915,12 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (templateParamStr) {
           // Template already contains hints[*], params[airingChannels], params[airingTimes],
           // params[libraryType], params[mediaProviderID] — don't duplicate them.
-          // Append only fields absent from the template.
+          // Plex applies prefs defaults server-side; omit prefs from the template path.
           const extras: string[] = [
             `type=${contentType}`,
             `targetSectionLocationID=${dvrSectionLocationId ?? ""}`,
           ];
           if (sectionId !== undefined) extras.push(`targetLibrarySectionID=${sectionId}`);
-          extras.push(
-            `prefs%5BonlyNewAirings%5D=1`,
-            `prefs%5BminVideoQuality%5D=0`,
-            `prefs%5BreplaceLowerQuality%5D=false`,
-            `prefs%5BrecordPartials%5D=true`,
-            `prefs%5BstartOffsetMinutes%5D=${startMin}`,
-            `prefs%5BendOffsetMinutes%5D=${endMin}`,
-            `prefs%5BstartTimeslot%5D=-1`,
-            `prefs%5BcomskipEnabled%5D=-1`,
-            `prefs%5BcomskipMethod%5D=1`,
-            `prefs%5BoneShot%5D=${oneShot}`,
-            `prefs%5BremoteMedia%5D=false`,
-            `prefs%5BautoDeletionItemPolicyUnwatchedLibrary%5D=0`,
-            `prefs%5BautoDeletionItemPolicyWatchedLibrary%5D=0`
-          );
           if (dvrDeviceId) extras.push(`params%5BdeviceID%5D=${encodeURIComponent(dvrDeviceId)}`);
           if (dvrDeviceKey)
             extras.push(`params%5BdvrDeviceID%5D=${encodeURIComponent(dvrDeviceKey)}`);
