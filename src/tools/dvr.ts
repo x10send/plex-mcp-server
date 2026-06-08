@@ -825,7 +825,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           const device = dvr?.Device?.[0];
           if (device?.deviceId != null) dvrDeviceId = String(device.deviceId);
           if (device?.key != null) dvrDeviceKey = String(device.key);
-          if (args.debug) dvrRaw = JSON.stringify(dvrs.MediaContainer, null, 2).slice(0, 1500);
+          if (args.debug) dvrRaw = JSON.stringify(dvrs.MediaContainer, null, 2).slice(0, 3000);
         } catch {
           // Continue without DVR device info.
         }
@@ -915,15 +915,13 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (templateParamStr) {
           // Template already contains hints[*], params[airingChannels], params[airingTimes],
           // params[libraryType], params[mediaProviderID] — don't duplicate them.
-          // Plex applies prefs defaults server-side; omit prefs from the template path.
+          // Plex applies prefs and picks the DVR device from the library section server-side;
+          // only append the target location fields.
           const extras: string[] = [
             `type=${contentType}`,
             `targetSectionLocationID=${dvrSectionLocationId ?? ""}`,
           ];
           if (sectionId !== undefined) extras.push(`targetLibrarySectionID=${sectionId}`);
-          if (dvrDeviceId) extras.push(`params%5BdeviceID%5D=${encodeURIComponent(dvrDeviceId)}`);
-          if (dvrDeviceKey)
-            extras.push(`params%5BdvrDeviceID%5D=${encodeURIComponent(dvrDeviceKey)}`);
           postBody = [templateParamStr, ...extras].join("&");
         } else {
           postBody = Object.entries(params)

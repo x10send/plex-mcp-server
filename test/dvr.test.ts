@@ -988,12 +988,12 @@ describe("schedule_recording", () => {
     assert.match(body, /params%5BairingTimes%5D=1781323200/);
     assert.match(body, /params%5BairingChannels%5D=ch-comet/);
     // Required extras are appended.
-    assert.match(body, /params%5BdeviceID%5D=105838FF/);
     assert.match(body, /targetSectionLocationID=2/);
     assert.match(body, /&type=1&/);
     assert.match(body, /targetLibrarySectionID=1/);
-    // prefs are not sent on the template path — Plex applies defaults server-side
+    // prefs and device IDs are not sent — Plex picks DVR device from the library section
     assert.doesNotMatch(body, /prefs%5B/);
+    assert.doesNotMatch(body, /deviceID/);
   });
 
   it("uses channel_key+channel_id override without guide lookup", async () => {
