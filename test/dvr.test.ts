@@ -832,6 +832,59 @@ describe("schedule_recording", () => {
     assert.equal(params?.["targetLibrarySectionID"], undefined);
   });
 
+  it("target_library_section_id arg overrides template when provided", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    // Template returns sectionId 6, but explicit arg is 99 — arg wins
+    client.setResponse(TEMPLATE_PATH, SUBSCRIPTION_TEMPLATE);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", target_library_section_id: 99 },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.["targetLibrarySectionID"], "99");
+  });
+
+  it("target_library_section_id arg used as fallback when template fails", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    // No template mock → template fails silently
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", target_library_section_id: 3 },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.["targetLibrarySectionID"], "3");
+  });
+
+  it("infers type=1 for movies from plex://movie/ GUID when program_type omitted", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+    });
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "plex%3A%2F%2Fmovie%2Fabc123" },
+      client
+    );
+    const params = client.getLastPostParams();
+    assert.equal(params?.["type"], "1");
+    assert.equal(params?.["params[libraryType]"], "1");
+    assert.equal(params?.["prefs[oneShot]"], "true");
+  });
+
   it("sets params[deviceID], params[dvrDeviceID], targetSectionLocationID from /livetv/dvrs", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);

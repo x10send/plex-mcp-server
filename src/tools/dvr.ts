@@ -672,6 +672,14 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         .describe(
           "Keep recording this many seconds past the end time (0–3600, rounded up to minutes). Default 5 minutes."
         ),
+      target_library_section_id: z
+        .number()
+        .int()
+        .positive()
+        .optional()
+        .describe(
+          "Library section ID for DVR recordings. Only needed if the automatic template lookup fails. Find it with get_libraries — look for the DVR or recording library section."
+        ),
       debug: z
         .union([z.boolean(), z.string().transform((v) => v === "true")])
         .optional()
@@ -803,7 +811,9 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         // 4. Type depends on content: 1=movie, 2=TV/episode.
         //    Confirmed from stored Plex subscriptions: movie rules have type=1, TV rules have type=2.
         //    One-shot vs season pass is differentiated by prefs[oneShot], not type.
-        const isMovie = args.program_type === "movie";
+        //    Auto-detect from GUID when program_type is omitted (plex://movie/ → type 1).
+        const isMovie =
+          args.program_type === "movie" || (!args.program_type && programGuid.includes("//movie/"));
         const contentType = isMovie ? "1" : "2";
         const libraryType = isMovie ? "1" : "2";
         const oneShot = args.program_type === "show" ? "false" : "true";
@@ -862,8 +872,9 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (hintThumb) params["hints[thumb]"] = hintThumb;
         if (resolvedAiringChannels) params["params[airingChannels]"] = resolvedAiringChannels;
         if (resolvedAiringTime !== undefined) params["params[airingTimes]"] = resolvedAiringTime;
-        if (sectionId !== undefined) {
-          params["targetLibrarySectionID"] = String(sectionId);
+        const effectiveSectionId = args.target_library_section_id ?? sectionId;
+        if (effectiveSectionId !== undefined) {
+          params["targetLibrarySectionID"] = String(effectiveSectionId);
         }
         if (dvrDeviceId !== undefined) params["params[deviceID]"] = dvrDeviceId;
         if (dvrDeviceKey !== undefined) params["params[dvrDeviceID]"] = dvrDeviceKey;
@@ -874,7 +885,9 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           debugLines.push("=== DEBUG: schedule_recording ===");
           debugLines.push(`providerId: ${providerId}`);
           debugLines.push(`programGuid: ${programGuid}`);
-          debugLines.push(`sectionId: ${sectionId ?? "not found"}`);
+          debugLines.push(
+            `sectionId: ${effectiveSectionId ?? "not found"}${args.target_library_section_id != null ? " (from arg)" : sectionId != null ? " (from template)" : ""}`
+          );
           debugLines.push(`dvrSectionLocationId: ${dvrSectionLocationId ?? "not found"}`);
           debugLines.push(`dvrDeviceId: ${dvrDeviceId ?? "not found"}`);
           debugLines.push(`dvrDeviceKey: ${dvrDeviceKey ?? "not found"}`);
