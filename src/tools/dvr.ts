@@ -720,6 +720,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         let sectionId: number | undefined;
         let templateParamStr: string | undefined;
         let templateRaw: string | undefined;
+        let templateError: string | undefined;
         try {
           const tmpl = await client.get<TemplateResponse>("/media/subscriptions/template", {
             guid: programGuid,
@@ -734,7 +735,10 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           if (args.debug) {
             templateRaw = JSON.stringify(tmpl.MediaContainer, null, 2).slice(0, 3000);
           }
-        } catch {
+        } catch (err) {
+          if (args.debug) {
+            templateError = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+          }
           // Continue without template.
         }
 
@@ -860,8 +864,6 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (resolvedAiringTime !== undefined) params["params[airingTimes]"] = resolvedAiringTime;
         if (sectionId !== undefined) {
           params["targetLibrarySectionID"] = String(sectionId);
-        } else if (dvrSectionLocationId !== undefined) {
-          params["targetLibrarySectionID"] = dvrSectionLocationId;
         }
         if (dvrDeviceId !== undefined) params["params[deviceID]"] = dvrDeviceId;
         if (dvrDeviceKey !== undefined) params["params[dvrDeviceID]"] = dvrDeviceKey;
@@ -871,10 +873,12 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (args.debug) {
           debugLines.push("=== DEBUG: schedule_recording ===");
           debugLines.push(`providerId: ${providerId}`);
+          debugLines.push(`programGuid: ${programGuid}`);
           debugLines.push(`sectionId: ${sectionId ?? "not found"}`);
           debugLines.push(`dvrSectionLocationId: ${dvrSectionLocationId ?? "not found"}`);
           debugLines.push(`dvrDeviceId: ${dvrDeviceId ?? "not found"}`);
           debugLines.push(`dvrDeviceKey: ${dvrDeviceKey ?? "not found"}`);
+          if (templateError) debugLines.push(`Template fetch error: ${templateError}`);
           if (templateRaw) debugLines.push(`Template response:\n${templateRaw}`);
           if (dvrRaw) debugLines.push(`/livetv/dvrs response:\n${dvrRaw}`);
           debugLines.push("Pre-flight check:");

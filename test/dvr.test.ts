@@ -846,7 +846,8 @@ describe("schedule_recording", () => {
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
     const params = client.getLastPostParams();
     assert.equal(params?.["targetSectionLocationID"], "2");
-    assert.equal(params?.["targetLibrarySectionID"], "2");
+    // targetLibrarySectionID only comes from the subscription template, not from /livetv/dvrs
+    assert.equal(params?.["targetLibrarySectionID"], undefined);
     assert.equal(params?.["params[deviceID]"], "105838FF");
     assert.equal(params?.["params[dvrDeviceID]"], "1");
   });
