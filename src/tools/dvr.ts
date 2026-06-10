@@ -673,9 +673,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           "Keep recording this many seconds past the end time (0–3600, rounded up to minutes). Default 5 minutes."
         ),
       target_library_section_id: z
-        .number()
-        .int()
-        .positive()
+        .union([z.number().int().positive(), z.string().regex(/^\d+$/).transform(Number)])
         .optional()
         .describe(
           "Library section ID for DVR recordings. Only needed if the automatic template lookup fails. Find it with get_libraries — look for the DVR or recording library section."
@@ -879,15 +877,20 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (dvrDeviceId !== undefined) params["params[deviceID]"] = dvrDeviceId;
         if (dvrDeviceKey !== undefined) params["params[dvrDeviceID]"] = dvrDeviceKey;
 
-        // 8. Collect debug info if requested.
+        // 8. Collect debug info and run pre-flight check.
+        const sectionIdSource =
+          args.target_library_section_id != null
+            ? "explicit argument"
+            : sectionId != null
+              ? "template"
+              : "unresolved";
         const debugLines: string[] = [];
         if (args.debug) {
           debugLines.push("=== DEBUG: schedule_recording ===");
           debugLines.push(`providerId: ${providerId}`);
           debugLines.push(`programGuid: ${programGuid}`);
-          debugLines.push(
-            `sectionId: ${effectiveSectionId ?? "not found"}${args.target_library_section_id != null ? " (from arg)" : sectionId != null ? " (from template)" : ""}`
-          );
+          debugLines.push(`targetLibrarySectionID source: ${sectionIdSource}`);
+          debugLines.push(`targetLibrarySectionID = ${effectiveSectionId ?? "not found"}`);
           debugLines.push(`dvrSectionLocationId: ${dvrSectionLocationId ?? "not found"}`);
           debugLines.push(`dvrDeviceId: ${dvrDeviceId ?? "not found"}`);
           debugLines.push(`dvrDeviceKey: ${dvrDeviceKey ?? "not found"}`);
@@ -895,7 +898,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           if (templateRaw) debugLines.push(`Template response:\n${templateRaw}`);
           if (dvrRaw) debugLines.push(`/livetv/dvrs response:\n${dvrRaw}`);
           debugLines.push("Pre-flight check:");
-          const required: Array<[string, string | undefined]> = [
+          const preflightFields: Array<[string, string | undefined]> = [
             ["targetLibrarySectionID", params["targetLibrarySectionID"]],
             ["targetSectionLocationID", params["targetSectionLocationID"]],
             ["params[deviceID]", params["params[deviceID]"]],
@@ -903,35 +906,41 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
             ["params[airingChannels]", params["params[airingChannels]"]],
             ["params[airingTimes]", params["params[airingTimes]"]],
           ];
-          for (const [field, value] of required) {
+          for (const [field, value] of preflightFields) {
             const ok = value != null && value !== "";
             debugLines.push(`  ${ok ? "✓" : "✗"} ${field}${ok ? "" : " — MISSING"}`);
           }
           debugLines.push(`Template found: ${templateParamStr != null}`);
-          if (templateParamStr) {
-            debugLines.push(
-              `Template path used: SubscriptionTemplate[0].MediaSubscription[0].parameters`
-            );
-            debugLines.push(`Body source: template`);
-            debugLines.push(`Raw template parameters:\n${templateParamStr}`);
-          } else {
-            debugLines.push(`Body source: fallback`);
-            debugLines.push("POST params (fallback — no template):");
-            for (const [k, v] of Object.entries(params)) {
-              debugLines.push(`  ${k} = ${v}`);
-            }
-          }
-        }
-
-        // 9. POST the subscription as URL query parameters (empty body).
-        //    Plex's internal API passes all data as query string params even for POST.
-        if (args.debug) {
-          debugLines.push(`Endpoint: POST ${SUBSCRIPTIONS_PATH} (params as URL query string)`);
-          debugLines.push(`POST params:`);
+          debugLines.push(`Body source: ${templateParamStr != null ? "template" : "fallback"}`);
+          debugLines.push("POST params:");
           for (const [k, v] of Object.entries(params)) {
             debugLines.push(`  ${k} = ${v}`);
           }
+          debugLines.push(`Endpoint: POST ${SUBSCRIPTIONS_PATH} (params as URL query string)`);
           debugLines.push("=================================");
+        }
+
+        // 9. Pre-flight abort: targetLibrarySectionID is required by Plex.
+        if (params["targetLibrarySectionID"] == null) {
+          const hint =
+            "Provide target_library_section_id (run get_libraries to find the right section ID).";
+          if (args.debug) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    debugLines.join("\n") +
+                    `\n\nPre-flight failed: targetLibrarySectionID missing. Aborting before POST.\n${hint}`,
+                },
+              ],
+            };
+          }
+          return {
+            content: [
+              { type: "text", text: `Pre-flight failed: targetLibrarySectionID missing. ${hint}` },
+            ],
+          };
         }
 
         let data: SubscriptionsResponse;

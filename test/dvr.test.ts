@@ -626,7 +626,7 @@ describe("schedule_recording", () => {
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", channel_id: "ch-tnt" },
+      { program_id: "1001", channel_id: "ch-tnt", target_library_section_id: 1 },
       client
     );
     assert.equal(isError, false);
@@ -642,7 +642,7 @@ describe("schedule_recording", () => {
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001" },
+      { program_id: "1001", target_library_section_id: 1 },
       client
     );
     assert.equal(isError, false);
@@ -666,6 +666,7 @@ describe("schedule_recording", () => {
         channel_id: "ch-nbc",
         start_offset_seconds: 30,
         end_offset_seconds: 120,
+        target_library_section_id: 1,
       },
       client
     );
@@ -706,7 +707,12 @@ describe("schedule_recording", () => {
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", program_title: "Movie", channel_id: "ch-tnt" },
+      {
+        program_id: "1001",
+        program_title: "Movie",
+        channel_id: "ch-tnt",
+        target_library_section_id: 1,
+      },
       client
     );
     assert.equal(isError, false);
@@ -720,7 +726,12 @@ describe("schedule_recording", () => {
     const { isError, text } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "bad", program_title: "Bad Program", channel_id: "ch-tnt" },
+      {
+        program_id: "bad",
+        program_title: "Bad Program",
+        channel_id: "ch-tnt",
+        target_library_section_id: 1,
+      },
       client
     );
     assert.equal(isError, true);
@@ -736,7 +747,12 @@ describe("schedule_recording", () => {
     await callTool(
       register,
       "schedule_recording",
-      { program_id: "plex%3A%2F%2Fepisode%2Fabc", program_title: "My Show", channel_id: "ch-tnt" },
+      {
+        program_id: "plex%3A%2F%2Fepisode%2Fabc",
+        program_title: "My Show",
+        channel_id: "ch-tnt",
+        target_library_section_id: 1,
+      },
       client
     );
     const params = client.getLastPostParams();
@@ -772,6 +788,7 @@ describe("schedule_recording", () => {
         channel_id: "ch-tnt",
         start_offset_seconds: 30,
         end_offset_seconds: 120,
+        target_library_section_id: 1,
       },
       client
     );
@@ -789,7 +806,7 @@ describe("schedule_recording", () => {
     await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", program_title: "Movie" },
+      { program_id: "1001", program_title: "Movie", target_library_section_id: 1 },
       client
     );
     const params = client.getLastPostParams();
@@ -815,21 +832,22 @@ describe("schedule_recording", () => {
     assert.equal(params?.["params[mediaProviderID]"], "10");
   });
 
-  it("omits targetLibrarySectionID when template fetch fails", async () => {
+  it("aborts with pre-flight error when targetLibrarySectionID cannot be resolved", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
-    // No template mock → mock throws "no response configured" → caught silently
+    // No template mock, no target_library_section_id → pre-flight must abort
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
-    await callTool(
+    const { text, isError } = await callTool(
       register,
       "schedule_recording",
       { program_id: "1001", program_title: "Movie" },
       client
     );
-    const params = client.getLastPostParams();
-    assert.equal(params?.["targetLibrarySectionID"], undefined);
+    assert.equal(isError, false);
+    assert.match(text, /Pre-flight failed: targetLibrarySectionID missing/);
+    assert.equal(client.getLastPostParams(), undefined); // POST was never called
   });
 
   it("target_library_section_id arg overrides template when provided", async () => {
@@ -876,7 +894,7 @@ describe("schedule_recording", () => {
     await callTool(
       register,
       "schedule_recording",
-      { program_id: "plex%3A%2F%2Fmovie%2Fabc123" },
+      { program_id: "plex%3A%2F%2Fmovie%2Fabc123", target_library_section_id: 1 },
       client
     );
     const params = client.getLastPostParams();
@@ -888,6 +906,7 @@ describe("schedule_recording", () => {
   it("sets params[deviceID], params[dvrDeviceID], targetSectionLocationID from /livetv/dvrs", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    client.setResponse(TEMPLATE_PATH, SUBSCRIPTION_TEMPLATE);
     client.setResponse("/livetv/dvrs", {
       MediaContainer: {
         Dvr: [{ key: "2", Device: [{ deviceId: "105838FF", key: "1" }] }],
@@ -899,8 +918,7 @@ describe("schedule_recording", () => {
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
     const params = client.getLastPostParams();
     assert.equal(params?.["targetSectionLocationID"], "2");
-    // targetLibrarySectionID only comes from the subscription template, not from /livetv/dvrs
-    assert.equal(params?.["targetLibrarySectionID"], undefined);
+    assert.equal(params?.["targetLibrarySectionID"], "6"); // from template
     assert.equal(params?.["params[deviceID]"], "105838FF");
     assert.equal(params?.["params[dvrDeviceID]"], "1");
   });
@@ -912,7 +930,12 @@ describe("schedule_recording", () => {
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
-    await callTool(register, "schedule_recording", { program_id: "1001" }, client);
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", target_library_section_id: 1 },
+      client
+    );
     const params = client.getLastPostParams();
     assert.equal(params?.["targetSectionLocationID"], "");
     assert.equal(params?.["params[deviceID]"], undefined);
@@ -948,7 +971,7 @@ describe("schedule_recording", () => {
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", debug: true },
+      { program_id: "1001", debug: true, target_library_section_id: 1 },
       client
     );
     assert.equal(isError, false);
@@ -988,7 +1011,7 @@ describe("schedule_recording", () => {
     const { text, isError } = await callTool(
       register,
       "schedule_recording",
-      { program_id: "1001", debug: true },
+      { program_id: "1001", debug: true, target_library_section_id: 1 },
       client
     );
     assert.equal(isError, false);
@@ -1057,6 +1080,7 @@ describe("schedule_recording", () => {
         channel_id: "ch-abc123",
         channel_key: "3.1 KTVKDT (Independent)",
         airing_time: 1780905600,
+        target_library_section_id: 1,
       },
       client
     );
@@ -1090,7 +1114,11 @@ describe("schedule_recording", () => {
     await callTool(
       register,
       "schedule_recording",
-      { program_id: "plex%3A%2F%2Fepisode%2Fabc", channel_id: "ch-tnt" },
+      {
+        program_id: "plex%3A%2F%2Fepisode%2Fabc",
+        channel_id: "ch-tnt",
+        target_library_section_id: 1,
+      },
       client
     );
     const params = client.getLastPostParams();
@@ -1119,7 +1147,12 @@ describe("schedule_recording", () => {
     await callTool(
       register,
       "schedule_recording",
-      { program_id: "5001", program_title: "Maverick", program_type: "movie" },
+      {
+        program_id: "5001",
+        program_title: "Maverick",
+        program_type: "movie",
+        target_library_section_id: 1,
+      },
       client
     );
     const params = client.getLastPostParams();
@@ -1138,7 +1171,12 @@ describe("schedule_recording", () => {
     await callTool(
       register,
       "schedule_recording",
-      { program_id: "3001", program_title: "Highlander", program_type: "show" },
+      {
+        program_id: "3001",
+        program_title: "Highlander",
+        program_type: "show",
+        target_library_section_id: 2,
+      },
       client
     );
     const params = client.getLastPostParams();
@@ -1157,7 +1195,12 @@ describe("schedule_recording", () => {
     await callTool(
       register,
       "schedule_recording",
-      { program_id: "2001", program_title: "Breaking Bad", program_type: "episode" },
+      {
+        program_id: "2001",
+        program_title: "Breaking Bad",
+        program_type: "episode",
+        target_library_section_id: 2,
+      },
       client
     );
     const params = client.getLastPostParams();
@@ -1325,7 +1368,12 @@ describe("dvr formatting edge cases", () => {
         MediaSubscription: [{ id: "7", title: "Sparse" }],
       },
     });
-    const { text } = await callTool(register, "schedule_recording", { program_id: "5" }, client);
+    const { text } = await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "5", target_library_section_id: 1 },
+      client
+    );
     assert.doesNotMatch(text, /Scheduled:/);
     assert.doesNotMatch(text, /Starts:/);
     assert.doesNotMatch(text, /Ends:/);
@@ -1339,7 +1387,12 @@ describe("dvr formatting edge cases", () => {
         MediaSubscription: [{ id: "8", hints: { title: "Flat Show" }, channelTitle: "NBC" }],
       },
     });
-    const { text } = await callTool(register, "schedule_recording", { program_id: "5" }, client);
+    const { text } = await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "5", target_library_section_id: 1 },
+      client
+    );
     assert.match(text, /Channel: NBC/);
   });
 });
