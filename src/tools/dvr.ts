@@ -673,10 +673,10 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           "Keep recording this many seconds past the end time (0–3600, rounded up to minutes). Default 5 minutes."
         ),
       target_library_section_id: z
-        .union([z.number().int().positive(), z.string().regex(/^\d+$/).transform(Number)])
+        .string()
         .optional()
         .describe(
-          "Library section ID for DVR recordings. Only needed if the automatic template lookup fails. Find it with get_libraries — look for the DVR or recording library section."
+          'Library section ID for DVR recordings. Only needed if the automatic template lookup fails. Find it with get_libraries — look for the DVR or recording library section (e.g. "1").'
         ),
       debug: z
         .union([z.boolean(), z.string().transform((v) => v === "true")])
@@ -870,9 +870,11 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (hintThumb) params["hints[thumb]"] = hintThumb;
         if (resolvedAiringChannels) params["params[airingChannels]"] = resolvedAiringChannels;
         if (resolvedAiringTime !== undefined) params["params[airingTimes]"] = resolvedAiringTime;
-        const effectiveSectionId = args.target_library_section_id ?? sectionId;
+        const effectiveSectionId: string | undefined =
+          args.target_library_section_id ??
+          (sectionId !== undefined ? String(sectionId) : undefined);
         if (effectiveSectionId !== undefined) {
-          params["targetLibrarySectionID"] = String(effectiveSectionId);
+          params["targetLibrarySectionID"] = effectiveSectionId;
         }
         if (dvrDeviceId !== undefined) params["params[deviceID]"] = dvrDeviceId;
         if (dvrDeviceKey !== undefined) params["params[dvrDeviceID]"] = dvrDeviceKey;
