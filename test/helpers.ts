@@ -7,27 +7,39 @@ type AnyRecord = Record<string, unknown>;
 
 export interface MockPlexClient extends IPlexClient {
   setResponse(path: string, response: AnyRecord): void;
+  setPostResponse(path: string, response: AnyRecord): void;
   setError(path: string, status: number, message: string): void;
+  setPostError(path: string, status: number, message: string): void;
   getLastPostParams(): Record<string, string> | undefined;
   getLastPostFormParams(): Record<string, string> | undefined;
   getLastPostRawBody(): string | undefined;
   getLastGetParams(): Record<string, string> | undefined;
+  getLastDeletePath(): string | undefined;
 }
 
 export function makeMockClient(): MockPlexClient {
   const responses = new Map<string, AnyRecord>();
+  const postResponses = new Map<string, AnyRecord>();
   const errors = new Map<string, { status: number; message: string }>();
+  const postErrors = new Map<string, { status: number; message: string }>();
   let lastPostParams: Record<string, string> | undefined;
   let lastPostFormParams: Record<string, string> | undefined;
   let lastPostRawBody: string | undefined;
   let lastGetParams: Record<string, string> | undefined;
+  let lastDeletePath: string | undefined;
 
   return {
     setResponse(path: string, response: AnyRecord) {
       responses.set(path, response);
     },
+    setPostResponse(path: string, response: AnyRecord) {
+      postResponses.set(path, response);
+    },
     setError(path: string, status: number, message: string) {
       errors.set(path, { status, message });
+    },
+    setPostError(path: string, status: number, message: string) {
+      postErrors.set(path, { status, message });
     },
     getLastPostParams() {
       return lastPostParams;
@@ -40,6 +52,9 @@ export function makeMockClient(): MockPlexClient {
     },
     getLastGetParams() {
       return lastGetParams;
+    },
+    getLastDeletePath() {
+      return lastDeletePath;
     },
     async get<T>(path: string, params?: Record<string, string>): Promise<T> {
       lastGetParams = params;
@@ -56,12 +71,12 @@ export function makeMockClient(): MockPlexClient {
     },
     async post<T>(path: string, params?: Record<string, string>): Promise<T> {
       lastPostParams = params;
-      const err = errors.get(path);
+      const err = postErrors.get(path) ?? errors.get(path);
       if (err) {
         const { PlexApiError } = await import("../src/plex-client.js");
         throw new PlexApiError(err.status, err.message);
       }
-      const res = responses.get(path);
+      const res = postResponses.get(path) ?? responses.get(path);
       if (res === undefined) {
         throw new Error(`MockPlexClient: no response configured for POST ${path}`);
       }
@@ -94,6 +109,7 @@ export function makeMockClient(): MockPlexClient {
       return res as T;
     },
     async delete<T>(path: string): Promise<T> {
+      lastDeletePath = path;
       const err = errors.get(path);
       if (err) {
         const { PlexApiError } = await import("../src/plex-client.js");

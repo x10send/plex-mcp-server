@@ -850,6 +850,27 @@ describe("schedule_recording", () => {
     assert.equal(client.getLastPostParams(), undefined); // POST was never called
   });
 
+  it("rejects recording when airing_time is more than 30 minutes in the past", async () => {
+    const client = makeMockClient();
+    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+    const staleTime = Math.floor(Date.now() / 1000) - 7200; // 2 hours ago
+    const { text, isError } = await callTool(
+      register,
+      "schedule_recording",
+      {
+        program_id: "plex%3A%2F%2Fmovie%2Fabc",
+        channel_id: "ch-tnt",
+        channel_key: "3.1 KTVKDT (Independent)",
+        airing_time: staleTime,
+        target_library_section_id: "1",
+      },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /already passed/);
+    assert.equal(client.getLastPostParams(), undefined); // POST was never called
+  });
+
   it("target_library_section_id arg overrides template when provided", async () => {
     const client = makeMockClient();
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
@@ -1022,6 +1043,7 @@ describe("schedule_recording", () => {
 
   it("uses targetLibrarySectionID from template and assembles full params dict", async () => {
     const client = makeMockClient();
+    const futureAiringTime = Math.floor(Date.now() / 1000) + 86400; // 1 day from now
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     // parameters lives inside MediaSubscription[0], not as a sibling of it.
     client.setResponse(TEMPLATE_PATH, {
@@ -1030,8 +1052,7 @@ describe("schedule_recording", () => {
           {
             MediaSubscription: [
               {
-                parameters:
-                  "hints%5BratingKey%5D=plex%253A%252F%252Fmovie%252Fabc&hints%5Bguid%5D=plex%253A%252F%252Fmovie%252Fabc&params%5BairingChannels%5D=ch-comet%253D3.2&params%5BairingTimes%5D=1781323200&params%5BlibraryType%5D=1&params%5BmediaProviderID%5D=10",
+                parameters: `hints%5BratingKey%5D=plex%253A%252F%252Fmovie%252Fabc&hints%5Bguid%5D=plex%253A%252F%252Fmovie%252Fabc&params%5BairingChannels%5D=ch-comet%253D3.2&params%5BairingTimes%5D=${futureAiringTime}&params%5BlibraryType%5D=1&params%5BmediaProviderID%5D=10`,
                 targetLibrarySectionID: 1,
               },
             ],
@@ -1053,7 +1074,7 @@ describe("schedule_recording", () => {
         program_type: "movie",
         channel_id: "ch-comet",
         channel_key: "3.2 KTVKDT2 (Comet)",
-        airing_time: 1781323200,
+        airing_time: futureAiringTime,
       },
       client
     );
@@ -1062,12 +1083,13 @@ describe("schedule_recording", () => {
     // targetLibrarySectionID comes from template's MediaSubscription[0].targetLibrarySectionID.
     assert.equal(postParams?.["targetLibrarySectionID"], "1");
     assert.ok(postParams?.["hints[ratingKey]"] != null);
-    assert.equal(postParams?.["params[airingTimes]"], "1781323200");
+    assert.equal(postParams?.["params[airingTimes]"], String(futureAiringTime));
     assert.ok(postParams?.["params[airingChannels]"]?.includes("ch-comet"));
   });
 
   it("uses channel_key+channel_id override without guide lookup", async () => {
     const client = makeMockClient();
+    const futureAiringTime = Math.floor(Date.now() / 1000) + 86400; // 1 day from now
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
@@ -1079,18 +1101,19 @@ describe("schedule_recording", () => {
         program_id: "1001",
         channel_id: "ch-abc123",
         channel_key: "3.1 KTVKDT (Independent)",
-        airing_time: 1780905600,
+        airing_time: futureAiringTime,
         target_library_section_id: "1",
       },
       client
     );
     const params = client.getLastPostParams();
     assert.equal(params?.["params[airingChannels]"], "ch-abc123=3.1 KTVKDT (Independent)");
-    assert.equal(params?.["params[airingTimes]"], "1780905600");
+    assert.equal(params?.["params[airingTimes]"], String(futureAiringTime));
   });
 
   it("auto-resolves airingChannels and airingTimes via guide lookup when channel_id provided", async () => {
     const client = makeMockClient();
+    const futureAiringTime = Math.floor(Date.now() / 1000) + 86400; // 1 day from now
     client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
     client.setResponse("/tv.plex.providers.epg.cloud/grid", {
       MediaContainer: {
@@ -1101,7 +1124,7 @@ describe("schedule_recording", () => {
               {
                 channelIdentifier: "ch-tnt",
                 channelTitle: "44.1 KPHELD (Independent)",
-                beginsAt: 1717200000,
+                beginsAt: futureAiringTime,
               },
             ],
           },
@@ -1123,7 +1146,7 @@ describe("schedule_recording", () => {
     );
     const params = client.getLastPostParams();
     assert.equal(params?.["params[airingChannels]"], "ch-tnt=44.1 KPHELD (Independent)");
-    assert.equal(params?.["params[airingTimes]"], "1717200000");
+    assert.equal(params?.["params[airingTimes]"], String(futureAiringTime));
   });
 
   it("omits airingChannels and airingTimes when no channel_id and guide lookup not possible", async () => {
@@ -1208,6 +1231,228 @@ describe("schedule_recording", () => {
     assert.equal(params?.["hints[type]"], "2");
     assert.equal(params?.["params[libraryType]"], "2");
     assert.equal(params?.["prefs[oneShot]"], "true");
+  });
+});
+
+// ── update_recording ──────────────────────────────────────────────────────────
+
+const UPDATE_SUB = {
+  id: "489",
+  type: 2,
+  targetLibrarySectionID: 3,
+  targetSectionLocationID: "2",
+  hints: {
+    title: "FIFA World Cup 2026",
+    guid: "plex://episode/69ecf90a",
+    ratingKey: "plex://episode/69ecf90a",
+    type: "2",
+  },
+  prefs: {
+    oneShot: true,
+    startOffsetMinutes: 1,
+    endOffsetMinutes: 5,
+  },
+  params: {
+    airingChannels: "ch-fox=10.1 KSAZDT (FOX)",
+    airingTimes: "1781312400",
+    mediaProviderID: 3,
+    libraryType: "2",
+    deviceID: "105838FF",
+    dvrDeviceID: "1",
+  },
+};
+
+const UPDATED_SUB = {
+  id: "490",
+  type: 2,
+  targetLibrarySectionID: 3,
+  hints: { title: "FIFA World Cup 2026", guid: "plex://episode/69ecf90a" },
+  prefs: { oneShot: true, startOffsetMinutes: 1, endOffsetMinutes: 60 },
+  params: { airingChannels: "ch-fox=10.1 KSAZDT (FOX)", airingTimes: "1781312400" },
+};
+
+describe("update_recording", () => {
+  it("creates new subscription with updated padding, then deletes the old one", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
+    client.setPostResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATED_SUB] } });
+    client.setResponse(`${SUBS_PATH}/489`, { MediaContainer: {} });
+    const { text, isError } = await callTool(
+      register,
+      "update_recording",
+      { subscription_id: "489", end_offset_seconds: 3600 },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /Recording updated/);
+    assert.match(text, /New Subscription ID: 490/);
+    assert.match(text, /Old subscription 489 cancelled/);
+    assert.match(text, /end \+60 min/);
+    assert.equal(client.getLastDeletePath(), `${SUBS_PATH}/489`);
+    const postParams = client.getLastPostParams();
+    assert.equal(postParams?.["prefs[endOffsetMinutes]"], "60");
+    assert.equal(postParams?.["prefs[startOffsetMinutes]"], "1"); // preserved from stored prefs
+    assert.equal(postParams?.["hints[guid]"], "plex://episode/69ecf90a");
+    assert.equal(postParams?.["targetLibrarySectionID"], "3");
+    assert.equal(postParams?.["params[airingChannels]"], "ch-fox=10.1 KSAZDT (FOX)");
+  });
+
+  it("preserves existing start and end offsets when neither arg is provided", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
+    client.setPostResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [UPDATED_SUB] },
+    });
+    client.setResponse(`${SUBS_PATH}/489`, { MediaContainer: {} });
+    await callTool(register, "update_recording", { subscription_id: "489" }, client);
+    const postParams = client.getLastPostParams();
+    assert.equal(postParams?.["prefs[startOffsetMinutes]"], "1"); // from UPDATE_SUB.prefs
+    assert.equal(postParams?.["prefs[endOffsetMinutes]"], "5"); // from UPDATE_SUB.prefs
+  });
+
+  it("returns not-found message when subscription_id is not in list", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [] } });
+    const { text, isError } = await callTool(
+      register,
+      "update_recording",
+      { subscription_id: "999" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /not found/i);
+    assert.equal(client.getLastPostParams(), undefined);
+  });
+
+  it("returns error and leaves original subscription when POST fails", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
+    client.setPostError(SUBS_PATH, 400, "Bad Request");
+    const { isError } = await callTool(
+      register,
+      "update_recording",
+      { subscription_id: "489", end_offset_seconds: 3600 },
+      client
+    );
+    assert.equal(isError, true); // falls through to toolError
+    assert.equal(client.getLastDeletePath(), undefined); // DELETE never called
+  });
+
+  it("returns warning but succeeds when DELETE fails after successful POST", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
+    client.setPostResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [UPDATED_SUB] },
+    });
+    client.setError(`${SUBS_PATH}/489`, 404, "Not found");
+    const { text, isError } = await callTool(
+      register,
+      "update_recording",
+      { subscription_id: "489", end_offset_seconds: 3600 },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /Recording updated/);
+    assert.match(text, /Warning.*cancel original subscription 489/i);
+    assert.match(text, /cancel_recording/);
+  });
+
+  it("uses stored deviceID and dvrDeviceID from subscription params", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
+    client.setPostResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [UPDATED_SUB] },
+    });
+    client.setResponse(`${SUBS_PATH}/489`, { MediaContainer: {} });
+    await callTool(register, "update_recording", { subscription_id: "489" }, client);
+    const postParams = client.getLastPostParams();
+    assert.equal(postParams?.["params[deviceID]"], "105838FF");
+    assert.equal(postParams?.["params[dvrDeviceID]"], "1");
+  });
+
+  it("re-fetches device info from /livetv/dvrs when subscription params lack deviceID", async () => {
+    const client = makeMockClient();
+    const subNoDevice = {
+      ...UPDATE_SUB,
+      params: { airingChannels: "ch-fox=FOX", mediaProviderID: 3, libraryType: "2" },
+    };
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [subNoDevice] } });
+    client.setPostResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [UPDATED_SUB] },
+    });
+    client.setResponse("/livetv/dvrs", {
+      MediaContainer: { Dvr: [{ key: "2", Device: [{ deviceId: "AABBCC", key: "7" }] }] },
+    });
+    client.setResponse(`${SUBS_PATH}/489`, { MediaContainer: {} });
+    await callTool(register, "update_recording", { subscription_id: "489" }, client);
+    const postParams = client.getLastPostParams();
+    assert.equal(postParams?.["params[deviceID]"], "AABBCC");
+    assert.equal(postParams?.["params[dvrDeviceID]"], "7");
+  });
+
+  it("target_library_section_id arg overrides stored targetLibrarySectionID", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
+    client.setPostResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [UPDATED_SUB] },
+    });
+    client.setResponse(`${SUBS_PATH}/489`, { MediaContainer: {} });
+    await callTool(
+      register,
+      "update_recording",
+      { subscription_id: "489", target_library_section_id: "99" },
+      client
+    );
+    const postParams = client.getLastPostParams();
+    assert.equal(postParams?.["targetLibrarySectionID"], "99");
+  });
+
+  it("returns not-configured when GET /media/subscriptions returns 404", async () => {
+    const client = makeMockClient();
+    client.setError(SUBS_PATH, 404, "Not found");
+    const { text, isError } = await callTool(
+      register,
+      "update_recording",
+      { subscription_id: "489" },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /not configured/i);
+  });
+
+  it("debug=true shows extracted params and POST details", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
+    client.setPostResponse(SUBS_PATH, {
+      MediaContainer: { MediaSubscription: [UPDATED_SUB] },
+    });
+    client.setResponse(`${SUBS_PATH}/489`, { MediaContainer: {} });
+    const { text, isError } = await callTool(
+      register,
+      "update_recording",
+      { subscription_id: "489", end_offset_seconds: 1800, debug: true },
+      client
+    );
+    assert.equal(isError, false);
+    assert.match(text, /DEBUG/);
+    assert.match(text, /guid: plex:\/\/episode\/69ecf90a/);
+    assert.match(text, /POST params:/);
+    assert.match(text, /Recording updated/);
+  });
+
+  it("debug=true shows POST failure details on error", async () => {
+    const client = makeMockClient();
+    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
+    client.setPostError(SUBS_PATH, 400, "Bad Request: stale airing");
+    const { text, isError } = await callTool(
+      register,
+      "update_recording",
+      { subscription_id: "489", debug: true },
+      client
+    );
+    assert.equal(isError, false); // debug mode returns structured error, not isError
+    assert.match(text, /POST failed: HTTP 400/);
+    assert.match(text, /original subscription 489 is unchanged/i);
   });
 });
 

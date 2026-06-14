@@ -16,13 +16,18 @@ interface DvrSubscriptionHints {
   title?: unknown;
   year?: unknown;
   guid?: unknown;
+  ratingKey?: unknown;
   thumb?: unknown;
+  type?: unknown;
 }
 
 interface DvrSubscriptionParams {
   airingChannels?: unknown;
   airingTimes?: unknown;
   mediaProviderID?: unknown;
+  libraryType?: unknown;
+  deviceID?: unknown;
+  dvrDeviceID?: unknown;
 }
 
 interface DvrSubscriptionDirectory {
@@ -806,6 +811,25 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           }
         }
 
+        // 3.7. Guard against past airings — Plex rejects subscriptions for airings that
+        //      have already occurred. Catch this early to avoid a confusing 400 response.
+        if (resolvedAiringTime !== undefined) {
+          const airingTimeSec = parseInt(resolvedAiringTime, 10);
+          const nowSec = Math.floor(Date.now() / 1000);
+          if (!isNaN(airingTimeSec) && airingTimeSec < nowSec - 1800) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    `Cannot schedule: the airing at ${formatLocalDateTime(airingTimeSec)} has already passed. ` +
+                    `Run get_live_tv_guide for a future window, then call schedule_recording immediately with the new data.`,
+                },
+              ],
+            };
+          }
+        }
+
         // 4. Type depends on content: 1=movie, 2=TV/episode.
         //    Confirmed from stored Plex subscriptions: movie rules have type=1, TV rules have type=2.
         //    One-shot vs season pass is differentiated by prefs[oneShot], not type.
@@ -1015,6 +1039,257 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
               type: "text",
               text: args.debug ? debugLines.join("\n") + "\n\n" + body : body,
             },
+          ],
+        };
+      } catch (err) {
+        return toolError(err);
+      }
+    }
+  );
+
+  server.tool(
+    "update_recording",
+    [
+      "Update the start/end padding on an existing DVR recording subscription.",
+      "Creates a new subscription with the updated padding, then cancels the old one.",
+      "If the POST step fails, the original subscription is preserved unchanged.",
+      "Use get_scheduled_recordings to find subscription IDs.",
+    ].join(" "),
+    {
+      subscription_id: z
+        .string()
+        .regex(/^\d+$/, "Subscription ID must be a positive integer")
+        .describe("Subscription ID to update (from get_scheduled_recordings)"),
+      start_offset_seconds: z
+        .number()
+        .int()
+        .min(0)
+        .max(600)
+        .optional()
+        .describe(
+          "Start recording this many seconds early (0–600, rounded up to minutes). Omit to keep existing value."
+        ),
+      end_offset_seconds: z
+        .number()
+        .int()
+        .min(0)
+        .max(3600)
+        .optional()
+        .describe(
+          "Keep recording this many seconds past the end time (0–3600, rounded up to minutes). Omit to keep existing value."
+        ),
+      target_library_section_id: z
+        .string()
+        .optional()
+        .describe(
+          "Override the library section ID. Only needed if the stored subscription is missing this field."
+        ),
+      debug: z
+        .union([z.boolean(), z.string().transform((v) => v === "true")])
+        .optional()
+        .describe("Show extracted subscription params and the full POST/DELETE details."),
+    },
+    async (args) => {
+      try {
+        // 1. Fetch the subscription list and find the target.
+        let subList: SubscriptionsResponse;
+        try {
+          subList = await client.get<SubscriptionsResponse>(SUBSCRIPTIONS_PATH);
+        } catch (err) {
+          if (err instanceof PlexApiError && err.status === 404) {
+            return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
+          }
+          throw err;
+        }
+
+        const subs = normaliseSubscriptions(subList.MediaContainer?.MediaSubscription);
+        const sub = subs.find((s) => subId(s) === args.subscription_id);
+        if (!sub) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Subscription ${args.subscription_id} not found. Run get_scheduled_recordings to list current subscriptions.`,
+              },
+            ],
+          };
+        }
+
+        // 2. Extract params from the stored subscription.
+        const hints = subHints(sub);
+        const sp = subParams(sub);
+        const prefs = subPrefs(sub);
+
+        const contentType = sub.type != null ? String(sub.type) : "2";
+        const guid = hints?.guid != null ? String(hints.guid) : undefined;
+        const ratingKey = hints?.ratingKey != null ? String(hints.ratingKey) : guid;
+        const hintType = hints?.type != null ? String(hints.type) : contentType;
+        const hintTitle = hints?.title != null ? String(hints.title) : undefined;
+        const hintYear = hints?.year != null ? String(hints.year) : undefined;
+        const hintThumb = hints?.thumb != null ? String(hints.thumb) : undefined;
+
+        const airingChannels = sp?.airingChannels != null ? String(sp.airingChannels) : undefined;
+        const airingTimes = sp?.airingTimes != null ? String(sp.airingTimes) : undefined;
+        const mediaProviderID =
+          sp?.mediaProviderID != null ? String(sp.mediaProviderID) : undefined;
+        const storedLibraryType = sp?.libraryType != null ? String(sp.libraryType) : contentType;
+        const storedDeviceId = sp?.deviceID != null ? String(sp.deviceID) : undefined;
+        const storedDvrDeviceId = sp?.dvrDeviceID != null ? String(sp.dvrDeviceID) : undefined;
+
+        const oneShot = prefs?.oneShot != null ? (prefs.oneShot ? "true" : "false") : "true";
+
+        // targetLibrarySectionID: explicit arg > stored in sub
+        const storedSectionId =
+          sub.targetLibrarySectionID != null ? String(sub.targetLibrarySectionID) : undefined;
+        const effectiveSectionId = args.target_library_section_id ?? storedSectionId;
+
+        const storedSectionLocId =
+          sub.targetSectionLocationID != null ? String(sub.targetSectionLocationID) : "";
+
+        // 3. Compute new offsets (preserve existing when arg is omitted).
+        const startMin =
+          args.start_offset_seconds !== undefined
+            ? Math.ceil(args.start_offset_seconds / 60)
+            : prefs?.startOffsetMinutes != null
+              ? Number(prefs.startOffsetMinutes)
+              : 0;
+        const endMin =
+          args.end_offset_seconds !== undefined
+            ? Math.ceil(args.end_offset_seconds / 60)
+            : prefs?.endOffsetMinutes != null
+              ? Number(prefs.endOffsetMinutes)
+              : 5;
+
+        // 4. Require guid to reconstruct the subscription.
+        if (guid == null) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Cannot update subscription ${args.subscription_id}: hints.guid not found in stored data. Cancel with cancel_recording and recreate with schedule_recording instead.`,
+              },
+            ],
+          };
+        }
+
+        // 5. Build POST params using stored values.
+        const params: Record<string, string> = {
+          type: contentType,
+          targetSectionLocationID: storedSectionLocId,
+          "params[libraryType]": storedLibraryType,
+          "prefs[onlyNewAirings]": "1",
+          "prefs[minVideoQuality]": "0",
+          "prefs[replaceLowerQuality]": "false",
+          "prefs[recordPartials]": "true",
+          "prefs[startOffsetMinutes]": String(startMin),
+          "prefs[endOffsetMinutes]": String(endMin),
+          "prefs[startTimeslot]": "-1",
+          "prefs[comskipEnabled]": "-1",
+          "prefs[comskipMethod]": "1",
+          "prefs[oneShot]": oneShot,
+          "prefs[remoteMedia]": "false",
+          "prefs[autoDeletionItemPolicyUnwatchedLibrary]": "0",
+          "prefs[autoDeletionItemPolicyWatchedLibrary]": "0",
+          "hints[type]": hintType,
+          "hints[guid]": guid,
+        };
+        if (ratingKey) params["hints[ratingKey]"] = ratingKey;
+        if (hintTitle) params["hints[title]"] = hintTitle;
+        if (hintYear) params["hints[year]"] = hintYear;
+        if (hintThumb) params["hints[thumb]"] = hintThumb;
+        if (mediaProviderID) params["params[mediaProviderID]"] = mediaProviderID;
+        if (airingChannels) params["params[airingChannels]"] = airingChannels;
+        if (airingTimes) params["params[airingTimes]"] = airingTimes;
+        if (effectiveSectionId) params["targetLibrarySectionID"] = effectiveSectionId;
+
+        // Device params: prefer stored values, refresh from /livetv/dvrs if absent.
+        let deviceId = storedDeviceId;
+        let dvrDeviceKey = storedDvrDeviceId;
+        if (deviceId == null || dvrDeviceKey == null) {
+          try {
+            const dvrs = await client.get<DvrDevicesResponse>("/livetv/dvrs");
+            const dvr = dvrs.MediaContainer?.Dvr?.[0];
+            const device = dvr?.Device?.[0];
+            if (deviceId == null && device?.deviceId != null) deviceId = String(device.deviceId);
+            if (dvrDeviceKey == null && device?.key != null) dvrDeviceKey = String(device.key);
+            if (!params["targetSectionLocationID"] && dvr?.key != null)
+              params["targetSectionLocationID"] = String(dvr.key);
+          } catch {
+            // Continue without updated device info.
+          }
+        }
+        if (deviceId) params["params[deviceID]"] = deviceId;
+        if (dvrDeviceKey) params["params[dvrDeviceID]"] = dvrDeviceKey;
+
+        const debugLines: string[] = [];
+        if (args.debug) {
+          debugLines.push("=== DEBUG: update_recording ===");
+          debugLines.push(`Subscription ID: ${args.subscription_id}`);
+          debugLines.push(`guid: ${guid}`);
+          debugLines.push(`contentType: ${contentType}`);
+          debugLines.push(`oneShot: ${oneShot}`);
+          debugLines.push(`targetLibrarySectionID: ${effectiveSectionId ?? "not found"}`);
+          debugLines.push(`New startMin: ${startMin}, endMin: ${endMin}`);
+          debugLines.push("POST params:");
+          for (const [k, v] of Object.entries(params)) {
+            debugLines.push(`  ${k} = ${v}`);
+          }
+          debugLines.push("=================================");
+        }
+
+        // 6. POST new subscription first — preserves original if POST fails.
+        let newData: SubscriptionsResponse;
+        try {
+          newData = await client.post<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
+        } catch (err) {
+          if (args.debug && err instanceof PlexApiError) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text:
+                    debugLines.join("\n") +
+                    `\n\nPOST failed: HTTP ${err.status}\nError: ${err.message}\nOriginal subscription ${args.subscription_id} is unchanged.`,
+                },
+              ],
+            };
+          }
+          if (err instanceof PlexApiError && err.status === 404) {
+            return { content: [{ type: "text", text: DVR_NOT_CONFIGURED }] };
+          }
+          throw err;
+        }
+
+        // 7. DELETE the old subscription.
+        const deleteEndpoint = `${SUBSCRIPTIONS_PATH}/${args.subscription_id}`;
+        let deleteWarning: string | undefined;
+        try {
+          await client.delete<SubscriptionsResponse>(deleteEndpoint);
+        } catch (err) {
+          const errMsg =
+            err instanceof PlexApiError ? `HTTP ${err.status} — ${err.message}` : String(err);
+          deleteWarning = `Warning: could not cancel original subscription ${args.subscription_id}: ${errMsg}. Run cancel_recording with subscription_id=${args.subscription_id} to clean up.`;
+        }
+
+        // 8. Format response.
+        const newSubs = normaliseSubscriptions(newData.MediaContainer?.MediaSubscription);
+        const newSub = newSubs[0];
+        const newSubId = newSub ? subId(newSub) : "?";
+        const title = newSub ? resolveSubscriptionTitle(newSub) : undefined;
+
+        const lines = [
+          `Recording updated.`,
+          `New Subscription ID: ${newSubId} (use this to cancel)`,
+          `Old subscription ${args.subscription_id} cancelled.`,
+        ];
+        if (title) lines.push(`Title: ${title}`);
+        lines.push(`Padding: start −${startMin} min, end +${endMin} min`);
+        if (deleteWarning) lines.push(`\n${deleteWarning}`);
+
+        const body = lines.join("\n");
+        return {
+          content: [
+            { type: "text", text: args.debug ? debugLines.join("\n") + "\n\n" + body : body },
           ],
         };
       } catch (err) {
