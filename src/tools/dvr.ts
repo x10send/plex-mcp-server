@@ -161,6 +161,18 @@ interface DvrDevicesResponse {
 
 const SUBSCRIPTIONS_PATH = "/media/subscriptions";
 
+// Keys the subscription template's `parameters` field already encodes.
+// When using the template (postRaw) path we exclude these from the extra
+// params we append — the template values are authoritative for content identity.
+const TEMPLATE_PARAM_KEYS = new Set([
+  "hints[ratingKey]",
+  "hints[guid]",
+  "params[airingChannels]",
+  "params[airingTimes]",
+  "params[libraryType]",
+  "params[mediaProviderID]",
+]);
+
 const DVR_NOT_CONFIGURED =
   "DVR is not configured on this Plex server, or no DVR device is paired. " +
   "Set up a tuner with DVR capability in Plex settings (Settings → Live TV & DVR).";
@@ -937,12 +949,22 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
             debugLines.push(`  ${ok ? "✓" : "✗"} ${field}${ok ? "" : " — MISSING"}`);
           }
           debugLines.push(`Template found: ${templateParamStr != null}`);
-          debugLines.push(`Body source: ${templateParamStr != null ? "template" : "fallback"}`);
-          debugLines.push("POST params:");
-          for (const [k, v] of Object.entries(params)) {
-            debugLines.push(`  ${k} = ${v}`);
+          debugLines.push(
+            `Body source: ${templateParamStr != null ? "template (postRaw)" : "fallback (URL query params)"}`
+          );
+          if (templateParamStr != null) {
+            debugLines.push("Extra params (appended to template body):");
+            for (const [k, v] of Object.entries(params)) {
+              if (!TEMPLATE_PARAM_KEYS.has(k)) debugLines.push(`  ${k} = ${v}`);
+            }
+            debugLines.push(`Endpoint: POST ${SUBSCRIPTIONS_PATH} (form body)`);
+          } else {
+            debugLines.push("POST params:");
+            for (const [k, v] of Object.entries(params)) {
+              debugLines.push(`  ${k} = ${v}`);
+            }
+            debugLines.push(`Endpoint: POST ${SUBSCRIPTIONS_PATH} (params as URL query string)`);
           }
-          debugLines.push(`Endpoint: POST ${SUBSCRIPTIONS_PATH} (params as URL query string)`);
           debugLines.push("=================================");
         }
 
@@ -971,7 +993,25 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
 
         let data: SubscriptionsResponse;
         try {
-          data = await client.post<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
+          if (templateParamStr != null) {
+            // Use the pre-assembled form body Plex provided for this GUID as the base,
+            // then append the extra fields the template omits (prefs, type, section IDs,
+            // device IDs, hint display fields). This is what Plex's own UI sends and is
+            // required for movies — client.post() (URL query params) causes 400 for movies.
+            const extraBody = Object.entries(params)
+              .filter(([k]) => !TEMPLATE_PARAM_KEYS.has(k))
+              .map(
+                ([k, v]) =>
+                  `${encodeURIComponent(k).replace(/%5B/gi, "[").replace(/%5D/gi, "]")}=${encodeURIComponent(v)}`
+              )
+              .join("&");
+            data = await client.postRaw<SubscriptionsResponse>(
+              SUBSCRIPTIONS_PATH,
+              `${templateParamStr}&${extraBody}`
+            );
+          } else {
+            data = await client.post<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
+          }
         } catch (err) {
           if (args.debug && err instanceof PlexApiError) {
             return {

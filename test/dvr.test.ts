@@ -1078,13 +1078,15 @@ describe("schedule_recording", () => {
       },
       client
     );
-    const postParams = client.getLastPostParams();
-    assert.ok(postParams != null, "post should have been called with params");
+    // Template has `parameters` → postRaw path; check raw form body, not URL query params.
+    const rawBody = client.getLastPostRawBody();
+    assert.ok(rawBody != null, "postRaw should have been called with template body");
+    const bodyParams = Object.fromEntries(new URLSearchParams(rawBody!));
     // targetLibrarySectionID comes from template's MediaSubscription[0].targetLibrarySectionID.
-    assert.equal(postParams?.["targetLibrarySectionID"], "1");
-    assert.ok(postParams?.["hints[ratingKey]"] != null);
-    assert.equal(postParams?.["params[airingTimes]"], String(futureAiringTime));
-    assert.ok(postParams?.["params[airingChannels]"]?.includes("ch-comet"));
+    assert.equal(bodyParams["targetLibrarySectionID"], "1");
+    assert.ok(bodyParams["hints[ratingKey]"] != null);
+    assert.equal(bodyParams["params[airingTimes]"], String(futureAiringTime));
+    assert.ok(bodyParams["params[airingChannels]"]?.includes("ch-comet"));
   });
 
   it("uses channel_key+channel_id override without guide lookup", async () => {

@@ -1,6 +1,6 @@
 {
   "name": "plex-mcp-server",
-  "version": "0.4.39",
+  "version": "0.4.40",
   "private": true,
   "description": "MCP server for Plex Media Server — browse libraries, search media, and get viewing recommendations via AI",
   "type": "module",
