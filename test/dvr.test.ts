@@ -756,10 +756,11 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["hints[ratingKey]"], "plex://episode/abc");
-    assert.equal(params?.["hints[guid]"], "plex://episode/abc");
-    assert.equal(params?.["hints[title]"], "My Show");
-    assert.equal(params?.["params[airingChannels]"], undefined);
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["hints[ratingKey]"], "plex://episode/abc");
+    assert.equal(params["hints[guid]"], "plex://episode/abc");
+    assert.equal(params["hints[title]"], "My Show");
+    assert.equal(params["params[airingChannels]"], undefined);
   });
 
   it("omits hints[title] when program_title is not provided", async () => {
@@ -768,9 +769,15 @@ describe("schedule_recording", () => {
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
-    await callTool(register, "schedule_recording", { program_id: "1001" }, client);
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", target_library_section_id: "1" },
+      client
+    );
     const params = client.getLastPostParams();
-    assert.equal(params?.["hints[title]"], undefined);
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["hints[title]"], undefined);
   });
 
   it("converts offset seconds to minutes (ceiling) in POST params", async () => {
@@ -793,8 +800,9 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["prefs[startOffsetMinutes]"], "1");
-    assert.equal(params?.["prefs[endOffsetMinutes]"], "2");
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["prefs[startOffsetMinutes]"], "1");
+    assert.equal(params["prefs[endOffsetMinutes]"], "2");
   });
 
   it("defaults end offset to 5 minutes when not specified", async () => {
@@ -810,8 +818,9 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["prefs[startOffsetMinutes]"], "0");
-    assert.equal(params?.["prefs[endOffsetMinutes]"], "5");
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["prefs[startOffsetMinutes]"], "0");
+    assert.equal(params["prefs[endOffsetMinutes]"], "5");
   });
 
   it("includes targetLibrarySectionID from template when available", async () => {
@@ -828,8 +837,15 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["targetLibrarySectionID"], "6");
-    assert.equal(params?.["params[mediaProviderID]"], "10");
+    assert.ok(params != null, "POST must be called");
+    // Template has no `parameters` field → fallback path (post, not postRaw).
+    assert.equal(
+      client.getLastPostRawBody(),
+      undefined,
+      "postRaw() must not be called on fallback path"
+    );
+    assert.equal(params["targetLibrarySectionID"], "6");
+    assert.equal(params["params[mediaProviderID]"], "10");
   });
 
   it("aborts with pre-flight error when targetLibrarySectionID cannot be resolved", async () => {
@@ -847,7 +863,16 @@ describe("schedule_recording", () => {
     );
     assert.equal(isError, false);
     assert.match(text, /Pre-flight failed: targetLibrarySectionID missing/);
-    assert.equal(client.getLastPostParams(), undefined); // POST was never called
+    assert.equal(
+      client.getLastPostParams(),
+      undefined,
+      "post() must not be called on pre-flight abort"
+    );
+    assert.equal(
+      client.getLastPostRawBody(),
+      undefined,
+      "postRaw() must not be called on pre-flight abort"
+    );
   });
 
   it("rejects recording when airing_time is more than 30 minutes in the past", async () => {
@@ -868,7 +893,16 @@ describe("schedule_recording", () => {
     );
     assert.equal(isError, false);
     assert.match(text, /already passed/);
-    assert.equal(client.getLastPostParams(), undefined); // POST was never called
+    assert.equal(
+      client.getLastPostParams(),
+      undefined,
+      "post() must not be called on stale airing"
+    );
+    assert.equal(
+      client.getLastPostRawBody(),
+      undefined,
+      "postRaw() must not be called on stale airing"
+    );
   });
 
   it("target_library_section_id arg overrides template when provided", async () => {
@@ -886,7 +920,14 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["targetLibrarySectionID"], "99");
+    assert.ok(params != null, "POST must be called");
+    // Template has no `parameters` field → fallback path (post, not postRaw).
+    assert.equal(
+      client.getLastPostRawBody(),
+      undefined,
+      "postRaw() must not be called on fallback path"
+    );
+    assert.equal(params["targetLibrarySectionID"], "99");
   });
 
   it("target_library_section_id arg used as fallback when template fails", async () => {
@@ -903,7 +944,8 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["targetLibrarySectionID"], "3");
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["targetLibrarySectionID"], "3");
   });
 
   it("infers type=1 for movies from plex://movie/ GUID when program_type omitted", async () => {
@@ -919,9 +961,10 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["type"], "1");
-    assert.equal(params?.["params[libraryType]"], "1");
-    assert.equal(params?.["prefs[oneShot]"], "true");
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["type"], "1");
+    assert.equal(params["params[libraryType]"], "1");
+    assert.equal(params["prefs[oneShot]"], "true");
   });
 
   it("sets params[deviceID], params[dvrDeviceID], targetSectionLocationID from /livetv/dvrs", async () => {
@@ -938,10 +981,17 @@ describe("schedule_recording", () => {
     });
     await callTool(register, "schedule_recording", { program_id: "1001" }, client);
     const params = client.getLastPostParams();
-    assert.equal(params?.["targetSectionLocationID"], "2");
-    assert.equal(params?.["targetLibrarySectionID"], "6"); // from template
-    assert.equal(params?.["params[deviceID]"], "105838FF");
-    assert.equal(params?.["params[dvrDeviceID]"], "1");
+    assert.ok(params != null, "POST must be called");
+    // Template has no `parameters` field → fallback path (post, not postRaw).
+    assert.equal(
+      client.getLastPostRawBody(),
+      undefined,
+      "postRaw() must not be called on fallback path"
+    );
+    assert.equal(params["targetSectionLocationID"], "2");
+    assert.equal(params["targetLibrarySectionID"], "6"); // from template
+    assert.equal(params["params[deviceID]"], "105838FF");
+    assert.equal(params["params[dvrDeviceID]"], "1");
   });
 
   it("omits DVR params when /livetv/dvrs fetch fails", async () => {
@@ -958,9 +1008,10 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["targetSectionLocationID"], "");
-    assert.equal(params?.["params[deviceID]"], undefined);
-    assert.equal(params?.["params[dvrDeviceID]"], undefined);
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["targetSectionLocationID"], "");
+    assert.equal(params["params[deviceID]"], undefined);
+    assert.equal(params["params[dvrDeviceID]"], undefined);
   });
 
   it("debug=true pre-flight check marks missing fields with ✗", async () => {
@@ -1078,9 +1129,14 @@ describe("schedule_recording", () => {
       },
       client
     );
-    // Template has `parameters` → postRaw path; check raw form body, not URL query params.
+    // Template has `parameters` → postRaw path; verify post() was NOT used.
+    assert.equal(
+      client.getLastPostParams(),
+      undefined,
+      "post() must not be called when template provides parameters"
+    );
     const rawBody = client.getLastPostRawBody();
-    assert.ok(rawBody != null, "postRaw should have been called with template body");
+    assert.ok(rawBody != null, "postRaw must be called with template body");
     const bodyParams = Object.fromEntries(new URLSearchParams(rawBody!));
     // targetLibrarySectionID comes from template's MediaSubscription[0].targetLibrarySectionID.
     assert.equal(bodyParams["targetLibrarySectionID"], "1");
@@ -1109,8 +1165,9 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["params[airingChannels]"], "ch-abc123=3.1 KTVKDT (Independent)");
-    assert.equal(params?.["params[airingTimes]"], String(futureAiringTime));
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["params[airingChannels]"], "ch-abc123=3.1 KTVKDT (Independent)");
+    assert.equal(params["params[airingTimes]"], String(futureAiringTime));
   });
 
   it("auto-resolves airingChannels and airingTimes via guide lookup when channel_id provided", async () => {
@@ -1147,8 +1204,9 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["params[airingChannels]"], "ch-tnt=44.1 KPHELD (Independent)");
-    assert.equal(params?.["params[airingTimes]"], String(futureAiringTime));
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["params[airingChannels]"], "ch-tnt=44.1 KPHELD (Independent)");
+    assert.equal(params["params[airingTimes]"], String(futureAiringTime));
   });
 
   it("omits airingChannels and airingTimes when no channel_id and guide lookup not possible", async () => {
@@ -1157,10 +1215,16 @@ describe("schedule_recording", () => {
     client.setResponse(SUBS_PATH, {
       MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
     });
-    await callTool(register, "schedule_recording", { program_id: "1001" }, client);
+    await callTool(
+      register,
+      "schedule_recording",
+      { program_id: "1001", target_library_section_id: "1" },
+      client
+    );
     const params = client.getLastPostParams();
-    assert.equal(params?.["params[airingChannels]"], undefined);
-    assert.equal(params?.["params[airingTimes]"], undefined);
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["params[airingChannels]"], undefined);
+    assert.equal(params["params[airingTimes]"], undefined);
   });
 
   it("uses type=1 and oneShot=true for program_type=movie", async () => {
@@ -1181,10 +1245,11 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["type"], "1");
-    assert.equal(params?.["hints[type]"], "1");
-    assert.equal(params?.["params[libraryType]"], "1");
-    assert.equal(params?.["prefs[oneShot]"], "true");
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["type"], "1");
+    assert.equal(params["hints[type]"], "1");
+    assert.equal(params["params[libraryType]"], "1");
+    assert.equal(params["prefs[oneShot]"], "true");
   });
 
   it("uses type=2 and oneShot=false for program_type=show", async () => {
@@ -1205,10 +1270,11 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["type"], "2");
-    assert.equal(params?.["hints[type]"], "2");
-    assert.equal(params?.["params[libraryType]"], "2");
-    assert.equal(params?.["prefs[oneShot]"], "false");
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["type"], "2");
+    assert.equal(params["hints[type]"], "2");
+    assert.equal(params["params[libraryType]"], "2");
+    assert.equal(params["prefs[oneShot]"], "false");
   });
 
   it("uses type=2 and oneShot=true for program_type=episode", async () => {
@@ -1229,10 +1295,11 @@ describe("schedule_recording", () => {
       client
     );
     const params = client.getLastPostParams();
-    assert.equal(params?.["type"], "2");
-    assert.equal(params?.["hints[type]"], "2");
-    assert.equal(params?.["params[libraryType]"], "2");
-    assert.equal(params?.["prefs[oneShot]"], "true");
+    assert.ok(params != null, "POST must be called");
+    assert.equal(params["type"], "2");
+    assert.equal(params["hints[type]"], "2");
+    assert.equal(params["params[libraryType]"], "2");
+    assert.equal(params["prefs[oneShot]"], "true");
   });
 });
 
@@ -1292,11 +1359,12 @@ describe("update_recording", () => {
     assert.match(text, /end \+60 min/);
     assert.equal(client.getLastDeletePath(), `${SUBS_PATH}/489`);
     const postParams = client.getLastPostParams();
-    assert.equal(postParams?.["prefs[endOffsetMinutes]"], "60");
-    assert.equal(postParams?.["prefs[startOffsetMinutes]"], "1"); // preserved from stored prefs
-    assert.equal(postParams?.["hints[guid]"], "plex://episode/69ecf90a");
-    assert.equal(postParams?.["targetLibrarySectionID"], "3");
-    assert.equal(postParams?.["params[airingChannels]"], "ch-fox=10.1 KSAZDT (FOX)");
+    assert.ok(postParams != null, "POST must be called");
+    assert.equal(postParams["prefs[endOffsetMinutes]"], "60");
+    assert.equal(postParams["prefs[startOffsetMinutes]"], "1"); // preserved from stored prefs
+    assert.equal(postParams["hints[guid]"], "plex://episode/69ecf90a");
+    assert.equal(postParams["targetLibrarySectionID"], "3");
+    assert.equal(postParams["params[airingChannels]"], "ch-fox=10.1 KSAZDT (FOX)");
   });
 
   it("preserves existing start and end offsets when neither arg is provided", async () => {
@@ -1308,8 +1376,9 @@ describe("update_recording", () => {
     client.setResponse(`${SUBS_PATH}/489`, { MediaContainer: {} });
     await callTool(register, "update_recording", { subscription_id: "489" }, client);
     const postParams = client.getLastPostParams();
-    assert.equal(postParams?.["prefs[startOffsetMinutes]"], "1"); // from UPDATE_SUB.prefs
-    assert.equal(postParams?.["prefs[endOffsetMinutes]"], "5"); // from UPDATE_SUB.prefs
+    assert.ok(postParams != null, "POST must be called");
+    assert.equal(postParams["prefs[startOffsetMinutes]"], "1"); // from UPDATE_SUB.prefs
+    assert.equal(postParams["prefs[endOffsetMinutes]"], "5"); // from UPDATE_SUB.prefs
   });
 
   it("returns not-found message when subscription_id is not in list", async () => {
@@ -1323,7 +1392,16 @@ describe("update_recording", () => {
     );
     assert.equal(isError, false);
     assert.match(text, /not found/i);
-    assert.equal(client.getLastPostParams(), undefined);
+    assert.equal(
+      client.getLastPostParams(),
+      undefined,
+      "post() must not be called when subscription not found"
+    );
+    assert.equal(
+      client.getLastPostRawBody(),
+      undefined,
+      "postRaw() must not be called when subscription not found"
+    );
   });
 
   it("returns error and leaves original subscription when POST fails", async () => {
@@ -1337,7 +1415,11 @@ describe("update_recording", () => {
       client
     );
     assert.equal(isError, true); // falls through to toolError
-    assert.equal(client.getLastDeletePath(), undefined); // DELETE never called
+    assert.equal(
+      client.getLastDeletePath(),
+      undefined,
+      "DELETE must not be called when POST fails"
+    );
   });
 
   it("returns warning but succeeds when DELETE fails after successful POST", async () => {
@@ -1368,8 +1450,9 @@ describe("update_recording", () => {
     client.setResponse(`${SUBS_PATH}/489`, { MediaContainer: {} });
     await callTool(register, "update_recording", { subscription_id: "489" }, client);
     const postParams = client.getLastPostParams();
-    assert.equal(postParams?.["params[deviceID]"], "105838FF");
-    assert.equal(postParams?.["params[dvrDeviceID]"], "1");
+    assert.ok(postParams != null, "POST must be called");
+    assert.equal(postParams["params[deviceID]"], "105838FF");
+    assert.equal(postParams["params[dvrDeviceID]"], "1");
   });
 
   it("re-fetches device info from /livetv/dvrs when subscription params lack deviceID", async () => {
@@ -1388,8 +1471,9 @@ describe("update_recording", () => {
     client.setResponse(`${SUBS_PATH}/489`, { MediaContainer: {} });
     await callTool(register, "update_recording", { subscription_id: "489" }, client);
     const postParams = client.getLastPostParams();
-    assert.equal(postParams?.["params[deviceID]"], "AABBCC");
-    assert.equal(postParams?.["params[dvrDeviceID]"], "7");
+    assert.ok(postParams != null, "POST must be called");
+    assert.equal(postParams["params[deviceID]"], "AABBCC");
+    assert.equal(postParams["params[dvrDeviceID]"], "7");
   });
 
   it("target_library_section_id arg overrides stored targetLibrarySectionID", async () => {
@@ -1406,7 +1490,8 @@ describe("update_recording", () => {
       client
     );
     const postParams = client.getLastPostParams();
-    assert.equal(postParams?.["targetLibrarySectionID"], "99");
+    assert.ok(postParams != null, "POST must be called");
+    assert.equal(postParams["targetLibrarySectionID"], "99");
   });
 
   it("returns not-configured when GET /media/subscriptions returns 404", async () => {
