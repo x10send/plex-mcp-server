@@ -248,7 +248,20 @@ export function registerLibraryTools(server: McpServer, client: IPlexClient): vo
         .optional()
         .describe("Filter by content rating (e.g. PG-13, TV-MA)"),
       studio: z.string().optional().describe("Filter by studio name"),
-      sort: z.string().optional().describe("Sort order (e.g. title, year, rating, addedAt)"),
+      sort: z
+        .enum([
+          "title",
+          "titleSort",
+          "year",
+          "rating",
+          "userRating",
+          "addedAt",
+          "lastViewedAt",
+          "originallyAvailableAt",
+          "duration",
+        ])
+        .optional()
+        .describe("Sort order"),
       resolution: z
         .enum(["sd", "720p", "1080p", "4k"])
         .optional()

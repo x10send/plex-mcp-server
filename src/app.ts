@@ -1,5 +1,11 @@
+import { createRequire } from "node:module";
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyRateLimit from "@fastify/rate-limit";
+import fastifyHelmet from "@fastify/helmet";
+
+const { version: SERVER_VERSION } = createRequire(import.meta.url)("../package.json") as {
+  version: string;
+};
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { PlexClient } from "./plex-client.js";
@@ -26,8 +32,13 @@ function resolveToken(
 }
 
 function buildMcpServer(plexUrl: string, token: string, clientId: string): McpServer {
-  const client = new PlexClient({ baseUrl: plexUrl, token, clientIdentifier: clientId });
-  const server = new McpServer({ name: "plex-mcp-server", version: "0.1.0" });
+  const client = new PlexClient({
+    baseUrl: plexUrl,
+    token,
+    clientIdentifier: clientId,
+    version: SERVER_VERSION,
+  });
+  const server = new McpServer({ name: "plex-mcp-server", version: SERVER_VERSION });
   registerLibraryTools(server, client);
   registerDiscoveryTools(server, client);
   registerLiveTvTools(server, client);
@@ -53,6 +64,8 @@ export function buildApp(config: AppConfig): FastifyInstance {
     max: 60,
     timeWindow: "1 minute",
   });
+
+  void app.register(fastifyHelmet);
 
   app.get("/health", async (_req, _reply) => {
     return { status: "ok" };

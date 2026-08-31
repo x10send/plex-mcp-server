@@ -2,6 +2,7 @@ export interface PlexClientConfig {
   baseUrl: string;
   token: string;
   clientIdentifier: string;
+  version?: string;
 }
 
 export interface IPlexClient {
@@ -32,7 +33,7 @@ export class PlexClient implements IPlexClient {
       "X-Plex-Token": config.token,
       "X-Plex-Client-Identifier": config.clientIdentifier,
       "X-Plex-Product": "plex-mcp-server",
-      "X-Plex-Version": "0.1.0",
+      "X-Plex-Version": config.version ?? "0.0.0",
       Accept: "application/json",
     };
   }

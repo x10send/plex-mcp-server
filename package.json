@@ -34,6 +34,7 @@
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage && npm run build"
   },
   "dependencies": {
+    "@fastify/helmet": "^13.1.1",
     "@fastify/rate-limit": "^11.2.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "fastify": "^5.4.0",
