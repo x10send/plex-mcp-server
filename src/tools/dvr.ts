@@ -376,11 +376,7 @@ function formatSubscription(s: DvrSubscription): string {
   }
 
   if (title === "Unknown") {
-    const raw = s as Record<string, unknown>;
-    const presentKeys = Object.keys(raw)
-      .filter((k) => raw[k] != null)
-      .join(", ");
-    lines.push(`  Debug: no title found; fields present: ${presentKeys || "none"}`);
+    lines.push("  (title could not be resolved)");
   }
 
   return lines.join("\n");
@@ -411,18 +407,13 @@ function fullyDecode(s: string): string {
 // ── Tool registration ────────────────────────────────────────────────────────
 
 export function registerDvrTools(server: McpServer, client: IPlexClient): void {
+  const debugMode = process.env.DEBUG_MCP === "true";
+
   server.tool(
     "get_scheduled_recordings",
     "List all DVR recording subscriptions grouped by type (one-shot episodes vs. series season passes) with IDs, channels, and air times. Use subscription IDs with cancel_recording.",
-    {
-      debug: z
-        .union([z.boolean(), z.literal("unknown"), z.string().transform((v) => v === "true")])
-        .optional()
-        .describe(
-          'Return raw JSON of the first two subscriptions for diagnosing field mapping issues. Use "unknown" to return raw data for all subscriptions that could not resolve a title.'
-        ),
-    },
-    async (args) => {
+    {},
+    async () => {
       try {
         let data: SubscriptionsResponse;
         try {
@@ -439,23 +430,13 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           return { content: [{ type: "text", text: "No scheduled recordings." }] };
         }
 
-        if (args.debug === "unknown") {
+        if (debugMode) {
           const unknowns = subs.filter((s) => resolveSubscriptionTitle(s) == null);
-          return {
-            content: [
-              {
-                type: "text",
-                text:
-                  unknowns.length === 0
-                    ? `No unresolved subscriptions out of ${subs.length}.`
-                    : `Unresolved subscriptions (${unknowns.length} of ${subs.length}):\n` +
-                      JSON.stringify(unknowns, null, 2).slice(0, 8000),
-              },
-            ],
-          };
-        }
-
-        if (args.debug) {
+          const unresolvedNote =
+            unknowns.length === 0
+              ? `No unresolved subscriptions out of ${subs.length}.`
+              : `Unresolved subscriptions (${unknowns.length} of ${subs.length}):\n` +
+                JSON.stringify(unknowns, null, 2).slice(0, 8000);
           const first = subs[0] as Record<string, unknown> | undefined;
           const keyDump = first
             ? Object.entries(first)
@@ -479,7 +460,8 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
               {
                 type: "text",
                 text:
-                  `Total subscriptions: ${subs.length}\n` +
+                  unresolvedNote +
+                  `\n\nTotal subscriptions: ${subs.length}\n` +
                   `First entry fields:\n  ${keyDump}\n` +
                   `First entry hints keys: ${hintsKeys}\n\n` +
                   `First 2 entries (raw):\n` +
@@ -695,12 +677,6 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         .describe(
           'Library section ID for DVR recordings. Only needed if the automatic template lookup fails. Find it with get_libraries — look for the DVR or recording library section (e.g. "1").'
         ),
-      debug: z
-        .union([z.boolean(), z.string().transform((v) => v === "true")])
-        .optional()
-        .describe(
-          "Show all POST params and the full Plex error response. Use this to diagnose 400 errors."
-        ),
     },
     async (args) => {
       try {
@@ -755,11 +731,11 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           if (sub?.targetLibrarySectionID != null) {
             sectionId = Number(sub.targetLibrarySectionID);
           }
-          if (args.debug) {
+          if (debugMode) {
             templateRaw = JSON.stringify(tmpl.MediaContainer, null, 2).slice(0, 3000);
           }
         } catch (err) {
-          if (args.debug) {
+          if (debugMode) {
             templateError = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
           }
           // Continue without template.
@@ -873,7 +849,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           const device = dvr?.Device?.[0];
           if (device?.deviceId != null) dvrDeviceId = String(device.deviceId);
           if (device?.key != null) dvrDeviceKey = String(device.key);
-          if (args.debug) dvrRaw = JSON.stringify(dvrs.MediaContainer, null, 2).slice(0, 3000);
+          if (debugMode) dvrRaw = JSON.stringify(dvrs.MediaContainer, null, 2).slice(0, 3000);
         } catch {
           // Continue without DVR device info.
         }
@@ -923,7 +899,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
               ? "template"
               : "unresolved";
         const debugLines: string[] = [];
-        if (args.debug) {
+        if (debugMode) {
           debugLines.push("=== DEBUG: schedule_recording ===");
           debugLines.push(`providerId: ${providerId}`);
           debugLines.push(`programGuid: ${programGuid}`);
@@ -972,7 +948,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (params["targetLibrarySectionID"] == null) {
           const hint =
             "Provide target_library_section_id (run get_libraries to find the right section ID).";
-          if (args.debug) {
+          if (debugMode) {
             return {
               content: [
                 {
@@ -1013,7 +989,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
             data = await client.post<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
           }
         } catch (err) {
-          if (args.debug && err instanceof PlexApiError) {
+          if (debugMode && err instanceof PlexApiError) {
             return {
               content: [
                 {
@@ -1039,7 +1015,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
             content: [
               {
                 type: "text",
-                text: args.debug ? debugLines.join("\n") + "\n\n" + noSubMsg : noSubMsg,
+                text: debugMode ? debugLines.join("\n") + "\n\n" + noSubMsg : noSubMsg,
               },
             ],
           };
@@ -1077,7 +1053,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           content: [
             {
               type: "text",
-              text: args.debug ? debugLines.join("\n") + "\n\n" + body : body,
+              text: debugMode ? debugLines.join("\n") + "\n\n" + body : body,
             },
           ],
         };
@@ -1124,10 +1100,6 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         .describe(
           "Override the library section ID. Only needed if the stored subscription is missing this field."
         ),
-      debug: z
-        .union([z.boolean(), z.string().transform((v) => v === "true")])
-        .optional()
-        .describe("Show extracted subscription params and the full POST/DELETE details."),
     },
     async (args) => {
       try {
@@ -1262,7 +1234,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         if (dvrDeviceKey) params["params[dvrDeviceID]"] = dvrDeviceKey;
 
         const debugLines: string[] = [];
-        if (args.debug) {
+        if (debugMode) {
           debugLines.push("=== DEBUG: update_recording ===");
           debugLines.push(`Subscription ID: ${args.subscription_id}`);
           debugLines.push(`guid: ${guid}`);
@@ -1282,7 +1254,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         try {
           newData = await client.post<SubscriptionsResponse>(SUBSCRIPTIONS_PATH, params);
         } catch (err) {
-          if (args.debug && err instanceof PlexApiError) {
+          if (debugMode && err instanceof PlexApiError) {
             return {
               content: [
                 {
@@ -1329,7 +1301,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         const body = lines.join("\n");
         return {
           content: [
-            { type: "text", text: args.debug ? debugLines.join("\n") + "\n\n" + body : body },
+            { type: "text", text: debugMode ? debugLines.join("\n") + "\n\n" + body : body },
           ],
         };
       } catch (err) {
@@ -1346,17 +1318,13 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         .string()
         .regex(/^\d+$/, "Subscription ID must be a positive integer")
         .describe("Subscription ID from get_scheduled_recordings or schedule_recording"),
-      debug: z
-        .union([z.boolean(), z.string().transform((v) => v === "true")])
-        .optional()
-        .describe("Show the DELETE endpoint, Plex response, and verification details."),
     },
     async (args) => {
       try {
         const endpoint = `${SUBSCRIPTIONS_PATH}/${args.subscription_id}`;
         const debugLines: string[] = [];
 
-        if (args.debug) {
+        if (debugMode) {
           debugLines.push("=== DEBUG: cancel_recording ===");
           debugLines.push(`Endpoint: DELETE ${endpoint}`);
         }
@@ -1366,7 +1334,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         try {
           deleteResponse = await client.delete<SubscriptionsResponse>(endpoint);
         } catch (err) {
-          if (args.debug && err instanceof PlexApiError) {
+          if (debugMode && err instanceof PlexApiError) {
             debugLines.push(`Delete response: HTTP ${err.status} — ${err.message}`);
             debugLines.push("=================================");
             return {
@@ -1383,7 +1351,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
           throw err;
         }
 
-        if (args.debug) {
+        if (debugMode) {
           const raw =
             deleteResponse != null
               ? JSON.stringify(deleteResponse, null, 2).slice(0, 1000)
@@ -1405,15 +1373,15 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
             remaining?.MediaContainer?.MediaSubscription
           );
           verified = !remainingSubs.some((s) => subId(s) === args.subscription_id);
-          if (args.debug) {
+          if (debugMode) {
             debugLines.push(`Verification GET: ${SUBSCRIPTIONS_PATH}`);
             debugLines.push(`Subscription ${args.subscription_id} still in list: ${!verified}`);
           }
         } catch {
-          if (args.debug) debugLines.push("Verification: could not fetch subscription list");
+          if (debugMode) debugLines.push("Verification: could not fetch subscription list");
         }
 
-        if (args.debug) debugLines.push("=================================");
+        if (debugMode) debugLines.push("=================================");
 
         const lines = [`Recording subscription ${args.subscription_id} cancelled.`];
         if (title) lines.push(`  Title: ${title}`);
@@ -1428,7 +1396,7 @@ export function registerDvrTools(server: McpServer, client: IPlexClient): void {
         const body = lines.join("\n");
         return {
           content: [
-            { type: "text", text: args.debug ? debugLines.join("\n") + "\n\n" + body : body },
+            { type: "text", text: debugMode ? debugLines.join("\n") + "\n\n" + body : body },
           ],
         };
       } catch (err) {

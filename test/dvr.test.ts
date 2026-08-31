@@ -186,20 +186,20 @@ describe("get_scheduled_recordings", () => {
   });
 
   it("debug=true returns raw subscription JSON", async () => {
-    const client = makeMockClient();
-    client.setResponse(SUBS_PATH, {
-      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
-    });
-    const { text, isError } = await callTool(
-      register,
-      "get_scheduled_recordings",
-      { debug: true },
-      client
-    );
-    assert.equal(isError, false);
-    assert.match(text, /Total subscriptions: 1/);
-    assert.match(text, /First 2 entries/);
-    assert.match(text, /National Treasure/);
+    process.env.DEBUG_MCP = "true";
+    try {
+      const client = makeMockClient();
+      client.setResponse(SUBS_PATH, {
+        MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+      });
+      const { text, isError } = await callTool(register, "get_scheduled_recordings", {}, client);
+      assert.equal(isError, false);
+      assert.match(text, /Total subscriptions: 1/);
+      assert.match(text, /First 2 entries/);
+      assert.match(text, /National Treasure/);
+    } finally {
+      delete process.env.DEBUG_MCP;
+    }
   });
 
   it("falls back to key field when id is absent", async () => {
@@ -414,47 +414,47 @@ describe("get_scheduled_recordings", () => {
     });
     const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
     assert.match(text, /\[ID: 999\] Unknown — All Episodes/);
-    assert.match(text, /Debug: no title found/);
+    assert.match(text, /title could not be resolved/);
   });
 
   it('debug="unknown" returns raw JSON for unresolved subscriptions', async () => {
-    const client = makeMockClient();
-    client.setResponse(SUBS_PATH, {
-      MediaContainer: {
-        MediaSubscription: [
-          { id: "1", Directory: { title: "Known Show" }, prefs: { oneShot: false } },
-          { id: "2", type: 2, title: "All Episodes", prefs: { oneShot: false } },
-        ],
-      },
-    });
-    const { text } = await callTool(
-      register,
-      "get_scheduled_recordings",
-      { debug: "unknown" },
-      client
-    );
-    assert.match(text, /Unresolved subscriptions \(1 of 2\)/);
-    assert.match(text, /"id": "2"/);
-    assert.doesNotMatch(text, /"id": "1"/);
+    process.env.DEBUG_MCP = "true";
+    try {
+      const client = makeMockClient();
+      client.setResponse(SUBS_PATH, {
+        MediaContainer: {
+          MediaSubscription: [
+            { id: "1", Directory: { title: "Known Show" }, prefs: { oneShot: false } },
+            { id: "2", type: 2, title: "All Episodes", prefs: { oneShot: false } },
+          ],
+        },
+      });
+      const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+      assert.match(text, /Unresolved subscriptions \(1 of 2\)/);
+      assert.match(text, /Total subscriptions: 2/);
+    } finally {
+      delete process.env.DEBUG_MCP;
+    }
   });
 
   it('debug="unknown" reports no unresolved when all titles resolve', async () => {
-    const client = makeMockClient();
-    client.setResponse(SUBS_PATH, {
-      MediaContainer: {
-        MediaSubscription: [
-          { id: "1", Directory: { title: "Show A" }, prefs: { oneShot: false } },
-          { id: "2", hints: { title: "Show B" }, prefs: { oneShot: false } },
-        ],
-      },
-    });
-    const { text } = await callTool(
-      register,
-      "get_scheduled_recordings",
-      { debug: "unknown" },
-      client
-    );
-    assert.match(text, /No unresolved subscriptions out of 2/);
+    process.env.DEBUG_MCP = "true";
+    try {
+      const client = makeMockClient();
+      client.setResponse(SUBS_PATH, {
+        MediaContainer: {
+          MediaSubscription: [
+            { id: "1", Directory: { title: "Show A" }, prefs: { oneShot: false } },
+            { id: "2", hints: { title: "Show B" }, prefs: { oneShot: false } },
+          ],
+        },
+      });
+      const { text } = await callTool(register, "get_scheduled_recordings", {}, client);
+      assert.match(text, /No unresolved subscriptions out of 2/);
+      assert.match(text, /Total subscriptions: 2/);
+    } finally {
+      delete process.env.DEBUG_MCP;
+    }
   });
 
   it("handles PascalCase Hints and Prefs field names", async () => {
@@ -1015,81 +1015,100 @@ describe("schedule_recording", () => {
   });
 
   it("debug=true pre-flight check marks missing fields with ✗", async () => {
-    const client = makeMockClient();
-    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
-    // No /livetv/dvrs → deviceID and dvrDeviceID will be missing
-    // No channel_id → airingChannels and airingTimes will be missing
-    client.setResponse(SUBS_PATH, {
-      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
-    });
-    const { text } = await callTool(
-      register,
-      "schedule_recording",
-      { program_id: "1001", debug: true },
-      client
-    );
-    assert.match(text, /Pre-flight check/);
-    assert.match(text, /✗.*params\[deviceID\].*MISSING/);
-    assert.match(text, /✗.*params\[airingChannels\].*MISSING/);
+    process.env.DEBUG_MCP = "true";
+    try {
+      const client = makeMockClient();
+      client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+      // No /livetv/dvrs → deviceID and dvrDeviceID will be missing
+      // No channel_id → airingChannels and airingTimes will be missing
+      client.setResponse(SUBS_PATH, {
+        MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+      });
+      const { text } = await callTool(
+        register,
+        "schedule_recording",
+        { program_id: "1001" },
+        client
+      );
+      assert.match(text, /Pre-flight check/);
+      assert.match(text, /✗.*params\[deviceID\].*MISSING/);
+      assert.match(text, /✗.*params\[airingChannels\].*MISSING/);
+    } finally {
+      delete process.env.DEBUG_MCP;
+    }
   });
 
   it("debug=true shows POST params in fallback output on success", async () => {
-    const client = makeMockClient();
-    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
-    // No template mock → fallback path shows raw POST params
-    client.setResponse(SUBS_PATH, {
-      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
-    });
-    const { text, isError } = await callTool(
-      register,
-      "schedule_recording",
-      { program_id: "1001", debug: true, target_library_section_id: "1" },
-      client
-    );
-    assert.equal(isError, false);
-    assert.match(text, /DEBUG/);
-    assert.match(text, /fallback/);
-    assert.match(text, /Recording scheduled/);
+    process.env.DEBUG_MCP = "true";
+    try {
+      const client = makeMockClient();
+      client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+      // No template mock → fallback path shows raw POST params
+      client.setResponse(SUBS_PATH, {
+        MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+      });
+      const { text, isError } = await callTool(
+        register,
+        "schedule_recording",
+        { program_id: "1001", target_library_section_id: "1" },
+        client
+      );
+      assert.equal(isError, false);
+      assert.match(text, /DEBUG/);
+      assert.match(text, /fallback/);
+      assert.match(text, /Recording scheduled/);
+    } finally {
+      delete process.env.DEBUG_MCP;
+    }
   });
 
   it("debug=true shows endpoint and POST params", async () => {
-    const client = makeMockClient();
-    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
-    client.setResponse(SUBS_PATH, {
-      MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
-    });
-    const { text, isError } = await callTool(
-      register,
-      "schedule_recording",
-      {
-        program_id: "plex%3A%2F%2Fmovie%2Fabc",
-        program_title: "The Rounders",
-        program_type: "movie",
-        debug: true,
-      },
-      client
-    );
-    assert.equal(isError, false);
-    assert.match(text, /Endpoint: POST \/media\/subscriptions/);
-    assert.match(text, /POST params:/);
-    assert.match(text, /type = 1/);
-    assert.match(text, /hints\[title\] = The Rounders/);
+    process.env.DEBUG_MCP = "true";
+    try {
+      const client = makeMockClient();
+      client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+      client.setResponse(SUBS_PATH, {
+        MediaContainer: { MediaSubscription: [SUBSCRIPTION] },
+      });
+      const { text, isError } = await callTool(
+        register,
+        "schedule_recording",
+        {
+          program_id: "plex%3A%2F%2Fmovie%2Fabc",
+          program_title: "The Rounders",
+          program_type: "movie",
+        },
+        client
+      );
+      assert.equal(isError, false);
+      assert.match(text, /Endpoint: POST \/media\/subscriptions/);
+      assert.match(text, /POST params:/);
+      assert.match(text, /type = 1/);
+      assert.match(text, /hints\[title\] = The Rounders/);
+    } finally {
+      delete process.env.DEBUG_MCP;
+    }
   });
 
   it("debug=true shows params and error details on POST failure", async () => {
-    const client = makeMockClient();
-    client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
-    client.setError(SUBS_PATH, 400, "Bad Request: invalid program");
-    const { text, isError } = await callTool(
-      register,
-      "schedule_recording",
-      { program_id: "1001", debug: true, target_library_section_id: "1" },
-      client
-    );
-    assert.equal(isError, false);
-    assert.match(text, /DEBUG/);
-    assert.match(text, /POST failed: HTTP 400/);
-    assert.match(text, /Bad Request/);
+    process.env.DEBUG_MCP = "true";
+    try {
+      const client = makeMockClient();
+      client.setResponse(PROVIDERS_PATH, EPG_PROVIDERS);
+      client.setError(SUBS_PATH, 400, "Bad Request: invalid program");
+      const { text, isError } = await callTool(
+        register,
+        "schedule_recording",
+        { program_id: "1001", target_library_section_id: "1" },
+        client
+      );
+      assert.equal(isError, false);
+      assert.match(text, /DEBUG/);
+      assert.match(text, /POST failed: HTTP 400/);
+      assert.match(text, /Bad Request/);
+    } finally {
+      delete process.env.DEBUG_MCP;
+    }
   });
 
   it("uses targetLibrarySectionID from template and assembles full params dict", async () => {
@@ -1508,38 +1527,48 @@ describe("update_recording", () => {
   });
 
   it("debug=true shows extracted params and POST details", async () => {
-    const client = makeMockClient();
-    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
-    client.setPostResponse(SUBS_PATH, {
-      MediaContainer: { MediaSubscription: [UPDATED_SUB] },
-    });
-    client.setResponse(`${SUBS_PATH}/489`, { MediaContainer: {} });
-    const { text, isError } = await callTool(
-      register,
-      "update_recording",
-      { subscription_id: "489", end_offset_seconds: 1800, debug: true },
-      client
-    );
-    assert.equal(isError, false);
-    assert.match(text, /DEBUG/);
-    assert.match(text, /guid: plex:\/\/episode\/69ecf90a/);
-    assert.match(text, /POST params:/);
-    assert.match(text, /Recording updated/);
+    process.env.DEBUG_MCP = "true";
+    try {
+      const client = makeMockClient();
+      client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
+      client.setPostResponse(SUBS_PATH, {
+        MediaContainer: { MediaSubscription: [UPDATED_SUB] },
+      });
+      client.setResponse(`${SUBS_PATH}/489`, { MediaContainer: {} });
+      const { text, isError } = await callTool(
+        register,
+        "update_recording",
+        { subscription_id: "489", end_offset_seconds: 1800 },
+        client
+      );
+      assert.equal(isError, false);
+      assert.match(text, /DEBUG/);
+      assert.match(text, /guid: plex:\/\/episode\/69ecf90a/);
+      assert.match(text, /POST params:/);
+      assert.match(text, /Recording updated/);
+    } finally {
+      delete process.env.DEBUG_MCP;
+    }
   });
 
   it("debug=true shows POST failure details on error", async () => {
-    const client = makeMockClient();
-    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
-    client.setPostError(SUBS_PATH, 400, "Bad Request: stale airing");
-    const { text, isError } = await callTool(
-      register,
-      "update_recording",
-      { subscription_id: "489", debug: true },
-      client
-    );
-    assert.equal(isError, false); // debug mode returns structured error, not isError
-    assert.match(text, /POST failed: HTTP 400/);
-    assert.match(text, /original subscription 489 is unchanged/i);
+    process.env.DEBUG_MCP = "true";
+    try {
+      const client = makeMockClient();
+      client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [UPDATE_SUB] } });
+      client.setPostError(SUBS_PATH, 400, "Bad Request: stale airing");
+      const { text, isError } = await callTool(
+        register,
+        "update_recording",
+        { subscription_id: "489" },
+        client
+      );
+      assert.equal(isError, false); // debug mode returns structured error, not isError
+      assert.match(text, /POST failed: HTTP 400/);
+      assert.match(text, /original subscription 489 is unchanged/i);
+    } finally {
+      delete process.env.DEBUG_MCP;
+    }
   });
 });
 
@@ -1614,34 +1643,44 @@ describe("cancel_recording", () => {
   });
 
   it("debug=true includes endpoint, response, and verification details", async () => {
-    const client = makeMockClient();
-    client.setResponse(`${SUBS_PATH}/42`, { MediaContainer: {} });
-    client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [] } });
-    const { text, isError } = await callTool(
-      register,
-      "cancel_recording",
-      { subscription_id: "42", debug: true },
-      client
-    );
-    assert.equal(isError, false);
-    assert.match(text, /DEBUG/);
-    assert.match(text, /DELETE.*\/media\/subscriptions\/42/);
-    assert.match(text, /Verification GET/);
-    assert.match(text, /cancelled/);
+    process.env.DEBUG_MCP = "true";
+    try {
+      const client = makeMockClient();
+      client.setResponse(`${SUBS_PATH}/42`, { MediaContainer: {} });
+      client.setResponse(SUBS_PATH, { MediaContainer: { MediaSubscription: [] } });
+      const { text, isError } = await callTool(
+        register,
+        "cancel_recording",
+        { subscription_id: "42" },
+        client
+      );
+      assert.equal(isError, false);
+      assert.match(text, /DEBUG/);
+      assert.match(text, /DELETE.*\/media\/subscriptions\/42/);
+      assert.match(text, /Verification GET/);
+      assert.match(text, /cancelled/);
+    } finally {
+      delete process.env.DEBUG_MCP;
+    }
   });
 
   it("debug=true returns structured error details on DELETE failure", async () => {
-    const client = makeMockClient();
-    client.setError(`${SUBS_PATH}/42`, 404, "Not found");
-    const { text, isError } = await callTool(
-      register,
-      "cancel_recording",
-      { subscription_id: "42", debug: true },
-      client
-    );
-    assert.equal(isError, false);
-    assert.match(text, /DEBUG/);
-    assert.match(text, /HTTP 404/);
+    process.env.DEBUG_MCP = "true";
+    try {
+      const client = makeMockClient();
+      client.setError(`${SUBS_PATH}/42`, 404, "Not found");
+      const { text, isError } = await callTool(
+        register,
+        "cancel_recording",
+        { subscription_id: "42" },
+        client
+      );
+      assert.equal(isError, false);
+      assert.match(text, /DEBUG/);
+      assert.match(text, /HTTP 404/);
+    } finally {
+      delete process.env.DEBUG_MCP;
+    }
   });
 
   it("rejects non-numeric subscription IDs (path traversal guard)", async () => {

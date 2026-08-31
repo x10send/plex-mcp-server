@@ -281,10 +281,9 @@ export function registerDiscoveryTools(server: McpServer, client: IPlexClient): 
     "get_recently_added",
     "Get recently added media items across all libraries, or scoped to a specific section.",
     {
-      section_id: z
-        .string()
-        .optional()
-        .describe("Library section ID to scope results (optional — all libraries if omitted)"),
+      section_id: NUMERIC_ID.optional().describe(
+        "Library section ID to scope results (optional — all libraries if omitted)"
+      ),
       limit: z
         .number()
         .int()
