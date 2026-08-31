@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from "fastify";
+import fastifyRateLimit from "@fastify/rate-limit";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { PlexClient } from "./plex-client.js";
@@ -38,6 +39,7 @@ function buildMcpServer(plexUrl: string, token: string, clientId: string): McpSe
 
 export function buildApp(config: AppConfig): FastifyInstance {
   const app = Fastify({
+    requestTimeout: 30_000,
     logger: {
       level: config.logLevel,
       redact: {
@@ -45,6 +47,11 @@ export function buildApp(config: AppConfig): FastifyInstance {
         censor: "[Redacted]",
       },
     },
+  });
+
+  void app.register(fastifyRateLimit, {
+    max: 60,
+    timeWindow: "1 minute",
   });
 
   app.get("/health", async (_req, _reply) => {

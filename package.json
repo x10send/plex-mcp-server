@@ -34,18 +34,19 @@
     "check": "npm run format:check && npm run lint && npm run typecheck && npm run test:coverage && npm run build"
   },
   "dependencies": {
+    "@fastify/rate-limit": "^11.2.0",
     "@modelcontextprotocol/sdk": "^1.12.1",
     "fastify": "^5.4.0",
     "zod": "^3.25.41"
   },
   "devDependencies": {
+    "@eslint/js": "^9.27.0",
     "@types/node": "^22.15.21",
     "eslint": "^9.27.0",
-    "@eslint/js": "^9.27.0",
-    "typescript-eslint": "^8.32.1",
     "prettier": "^3.5.3",
     "tsx": "^4.19.4",
-    "typescript": "^5.8.3"
+    "typescript": "^5.8.3",
+    "typescript-eslint": "^8.32.1"
   },
   "engines": {
     "node": ">=20"
