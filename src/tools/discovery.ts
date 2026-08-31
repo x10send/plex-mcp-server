@@ -57,7 +57,7 @@ export function registerDiscoveryTools(server: McpServer, client: IPlexClient): 
     "search_media",
     "Full-text search for movies, TV shows, episodes, or music. Optionally scope to a specific library section and/or content type.",
     {
-      query: z.string().min(1).describe("Search query string"),
+      query: z.string().min(1).max(500).describe("Search query string"),
       limit: z
         .number()
         .int()
@@ -366,11 +366,7 @@ export function registerDiscoveryTools(server: McpServer, client: IPlexClient): 
         .optional()
         .describe("Max history entries to return (default 30)"),
       account_id: z.number().int().optional().describe("Filter by Plex account ID (optional)"),
-      library_section_id: z
-        .number()
-        .int()
-        .optional()
-        .describe("Filter by library section (optional)"),
+      library_section_id: NUMERIC_ID.optional().describe("Filter by library section (optional)"),
     },
     async ({ limit = 30, account_id, library_section_id }) => {
       try {

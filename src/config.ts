@@ -12,14 +12,19 @@ export interface Config {
 
 // Octet comparison avoids JS signed 32-bit bitwise operator pitfalls for IPs with high bit set.
 function isPrivateIPv4(ip: string): boolean {
-  const [a, b] = ip.split(".").map(Number);
+  const [a, b, c] = ip.split(".").map(Number);
   return (
+    a === 0 ||
     a === 10 ||
     a === 127 ||
     (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
     (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 0 && c === 0) ||
     (a === 192 && b === 168) ||
-    (a === 169 && b === 254)
+    (a === 198 && (b === 51 || b === 18 || b === 19)) ||
+    (a === 203 && b === 0 && c === 113) ||
+    a >= 224
   );
 }
 

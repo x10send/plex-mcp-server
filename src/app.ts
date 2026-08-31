@@ -79,7 +79,11 @@ export function buildApp(config: AppConfig): FastifyInstance {
 
       try {
         await mcpServer.connect(transport);
-        reply.hijack();
+      } catch {
+        return reply.status(500).send({ error: "Internal error" });
+      }
+      reply.hijack();
+      try {
         await transport.handleRequest(req.raw, reply.raw, req.body);
       } finally {
         await mcpServer.close().catch(() => {});
